@@ -1,0 +1,15 @@
+{
+  "short_name": "MovieZone",
+  "name": "MovieZone Streaming Platform",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#e50914",
+  "background_color": "#000000"
+}
