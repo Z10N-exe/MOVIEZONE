@@ -1,5 +1,5 @@
 const axios = require('axios');
-const API_URL = 'http://127.0.0.1:5000/api';
+const API_URL = 'https://moviezone-api.onrender.com/api';
 
 async function testSeries() {
     try {
@@ -9,7 +9,7 @@ async function testSeries() {
         console.log('Response Status:', response.data.status);
         const subject = response.data.data.subject;
         console.log('Subject Type:', subject.subjectType);
-        
+
         // Check for episodes/seasons
         console.log('Keys in subject:', Object.keys(subject));
         if (subject.episodeVo) {

@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'http://127.0.0.1:5000/api');
+const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'https://moviezone-api.onrender.com/api');
 
 export const getImageUrl = (path, size = 'w342') => {
     if (!path) return '';
@@ -44,7 +44,7 @@ export const fetchSources = async (movieId, season = 0, episode = 0) => {
         const url = new URL(`${API_URL}/sources/${movieId}`);
         if (season) url.searchParams.append('season', season);
         if (episode) url.searchParams.append('episode', episode);
-        
+
         const response = await fetch(url);
         const json = await response.json();
         return json.data?.processedSources || [];
