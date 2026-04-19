@@ -19,18 +19,15 @@ services:
 
 
   # ============================================================
-  # 2) FRONTEND — Vite React App (ALREADY FREE)
+  # 2) FRONTEND — Vite React App (SERVE AS WEB)
   # ============================================================
-  - type: static
+  - type: web
     name: moviezone-frontend
+    runtime: node
+    plan: free
     buildCommand: npm install && npm run build
-    staticPublishPath: dist
+    startCommand: npx serve -s dist
 
     envVars:
       - key: VITE_API_URL
         value: https://moviezone-api.onrender.com/api
-
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
