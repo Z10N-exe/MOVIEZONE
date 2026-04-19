@@ -1,5 +1,5 @@
 // MovieZone Service Worker for PWA
-const CACHE_NAME = 'moviezone-v1';
+const CACHE_NAME = 'moviezone-v2';
 const ASSETS = [
   '/',
   '/index.html',
@@ -7,25 +7,51 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
   );
 });
 
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
 self.addEventListener('fetch', (event) => {
-  // Skip non-http/https schemes (e.g. chrome-extension, data:)
-  if (!(event.request.url.startsWith('http'))) return;
+  const url = new URL(event.request.url);
 
+  // Don't intercept: non-GET, API calls, or cross-origin requests
+  if (event.request.method !== 'GET') return;
+  if (url.pathname.startsWith('/api/')) return;
+  if (url.origin !== self.location.origin) return;
+
+  // For navigation requests (HTML pages), always go network-first
+  // so React Router routes like /profile, /admin always work
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() =>
+        caches.match('/index.html')
+      )
+    );
+    return;
+  }
+
+  // For static assets, cache-first
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      if (response) return response;
-
-      return fetch(event.request).catch(err => {
-        console.warn('Fetch failed for:', event.request.url, err);
-        return new Response('Network error', { status: 408, headers: { 'Content-Type': 'text/plain' } });
-      });
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request).then((res) => {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return res;
+      }).catch(() =>
+        new Response('Network error', { status: 408, headers: { 'Content-Type': 'text/plain' } })
+      );
     })
   );
 });
