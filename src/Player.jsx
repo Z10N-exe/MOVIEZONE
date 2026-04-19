@@ -46,12 +46,15 @@ export default function Player() {
 
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
-  const seasonParam = Math.max(0, parseInt(searchParams.get('season')) || 0);
-  const episodeParam = Math.max(0, parseInt(searchParams.get('episode')) || 0);
+  const seasonParam = parseInt(searchParams.get('season')) || 0;
+  const episodeParam = parseInt(searchParams.get('episode')) || 0;
+  // if season is 0 but episode > 0, it's likely a series with missing season — default to 1
+  const effectiveSeason = (seasonParam === 0 && episodeParam > 0) ? 1 : seasonParam;
+  const effectiveEpisode = episodeParam;
 
   // Build a play URL for a given quality
   const buildPlayUrl = (movieId, q) =>
-    `${API_BASE}/play/${movieId}?season=${seasonParam}&episode=${episodeParam}&quality=${q}`;
+    `${API_BASE}/play/${movieId}?season=${effectiveSeason}&episode=${effectiveEpisode}&quality=${q}`;
 
   // Fetch sources — validate they exist, then build quality options
   useEffect(() => {
@@ -70,7 +73,7 @@ export default function Player() {
         }
 
         // Validate sources exist and get available qualities
-        const sourcesRes = await fetchSources(targetId, seasonParam, episodeParam);
+        const sourcesRes = await fetchSources(targetId, effectiveSeason, effectiveEpisode);
         if (!sourcesRes?.length) {
           setError('No stream sources available for this title.');
           setLoading(false);
@@ -103,7 +106,7 @@ export default function Player() {
       }
     };
     load();
-  }, [id, seasonParam, episodeParam, isPremium]);
+  }, [id, effectiveSeason, effectiveEpisode, isPremium]);
 
   // Setup video — only when both sourceUrl and video element are ready
   useEffect(() => {

@@ -1,5 +1,5 @@
 // MovieZone Service Worker for PWA
-const CACHE_NAME = 'moviezone-v3';
+const CACHE_NAME = 'moviezone-v4';
 const ASSETS = [
   '/',
   '/index.html',
@@ -31,12 +31,19 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
 
   // For navigation requests (HTML pages), always go network-first
-  // so React Router routes like /profile, /admin always work
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() =>
-        caches.match('/index.html')
-      )
+      fetch(event.request)
+        .then(res => {
+          // cache the page for offline fallback
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put('/index.html', clone));
+          return res;
+        })
+        .catch(async () => {
+          const cached = await caches.match('/index.html');
+          return cached || new Response('<h1>Offline</h1>', { headers: { 'Content-Type': 'text/html' } });
+        })
     );
     return;
   }
