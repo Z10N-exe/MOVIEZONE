@@ -626,61 +626,116 @@ app.get('/api/info/:movieId', async (req, res) => {
 
 // ─── STREAMING & SOURCES ────────────────────────────────────────────────────
 
-// Returns signed CDN URLs directly to the browser.
-// The browser plays them directly — CDN allows browser IPs, blocks server IPs.
+// Returns signed CDN URLs. Also used by /api/stream to pipe video.
+async function getDownloads(movieId, season, episode) {
+    const infoRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/detail`, {
+        method: 'GET', params: { subjectId: movieId }
+    });
+    const movieInfo = processApiResponse(infoRes);
+    const detailPath = movieInfo?.subject?.detailPath;
+    if (!detailPath) return { downloads: [], title: '', detailPath: '' };
+
+    const dlRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/download`, {
+        method: 'GET',
+        params: { subjectId: movieId, se: season, ep: episode },
+        headers: {
+            'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
+            'Origin': 'https://fmoviesunblocked.net',
+            'X-Forwarded-For': '1.1.1.1',
+        }
+    });
+    const dlData = processApiResponse(dlRes);
+    return {
+        downloads: dlData?.downloads || [],
+        title: movieInfo?.subject?.title || 'video',
+        detailPath,
+    };
+}
+
 app.get('/api/sources/:movieId', async (req, res) => {
     try {
         const { movieId } = req.params;
         const season = parseInt(req.query.season) || 0;
         const episode = parseInt(req.query.episode) || 0;
 
-        console.log(`Sources: ${movieId} s${season}e${episode}`);
+        const { downloads, title } = await getDownloads(movieId, season, episode);
 
-        const infoRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/detail`, {
-            method: 'GET', params: { subjectId: movieId }
-        });
-        const movieInfo = processApiResponse(infoRes);
-        const detailPath = movieInfo?.subject?.detailPath;
-
-        if (!detailPath) {
+        if (!downloads.length) {
             return res.json({ status: 'success', data: { downloads: [], processedSources: [] } });
         }
 
-        const dlRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/download`, {
-            method: 'GET',
-            params: { subjectId: movieId, se: season, ep: episode },
-            headers: {
-                'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
-                'Origin': 'https://fmoviesunblocked.net',
-                'X-Forwarded-For': '1.1.1.1',
-            }
-        });
-        const dlData = processApiResponse(dlRes);
-
-        if (!dlData?.downloads?.length) {
-            return res.json({ status: 'success', data: { downloads: [], processedSources: [] } });
-        }
-
-        const title = movieInfo?.subject?.title || 'video';
         const protocol = req.get('x-forwarded-proto') || req.protocol;
         const baseUrl = `${protocol}://${req.get('host')}`;
 
-        const processedSources = dlData.downloads.map(file => ({
+        const processedSources = downloads.map(file => ({
             id: file.id,
             quality: Number(file.resolution) || file.resolution,
-            // directUrl: browser plays this directly — CDN allows browser IPs
             directUrl: file.url,
-            // downloadUrl: server proxies this for file download
+            streamUrl: `${baseUrl}/api/stream/${movieId}?season=${season}&episode=${episode}&quality=${file.resolution}`,
             downloadUrl: `${baseUrl}/api/download?url=${encodeURIComponent(file.url)}&title=${encodeURIComponent(title)}&quality=${file.resolution}`,
             size: file.size,
             format: 'mp4',
         }));
 
-        res.json({ status: 'success', data: { ...dlData, processedSources } });
-
+        res.json({ status: 'success', data: { downloads, processedSources } });
     } catch (error) {
         console.error('Sources error:', error.message);
         res.json({ status: 'success', data: { downloads: [], processedSources: [] } });
+    }
+});
+
+// Stream endpoint — fetches signed URL and pipes video using the SAME axiosInstance
+// so all 3 requests (detail, download, CDN) share the same HTTP agent and outbound IP
+app.get('/api/stream/:movieId', async (req, res) => {
+    try {
+        const { movieId } = req.params;
+        const season = parseInt(req.query.season) || 0;
+        const episode = parseInt(req.query.episode) || 0;
+        const qualityPref = parseInt(req.query.quality) || 480;
+
+        const { downloads } = await getDownloads(movieId, season, episode);
+        if (!downloads.length) return res.status(404).json({ status: 'error', message: 'No sources found' });
+
+        let source = downloads.find(d => Number(d.resolution) === qualityPref);
+        if (!source) {
+            source = downloads.reduce((a, b) =>
+                Math.abs(Number(b.resolution) - qualityPref) < Math.abs(Number(a.resolution) - qualityPref) ? b : a
+            );
+        }
+
+        console.log(`Streaming ${movieId} @ ${source.resolution}p`);
+
+        const range = req.headers.range;
+        const streamHeaders = {
+            'User-Agent': 'okhttp/4.12.0',
+            'Referer': 'https://fmoviesunblocked.net/',
+            'Origin': 'https://fmoviesunblocked.net',
+            'Connection': 'keep-alive',
+        };
+        if (range) streamHeaders['Range'] = range;
+
+        // Use axiosInstance (same HTTP agent as API calls) to stream from CDN
+        const upstream = await axiosInstance({
+            method: 'GET',
+            url: source.url,
+            responseType: 'stream',
+            headers: streamHeaders,
+            timeout: 0,
+            maxRedirects: 5,
+        });
+
+        ['content-type', 'content-length', 'content-range', 'accept-ranges'].forEach(h => {
+            if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+        });
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.status(upstream.status);
+        upstream.data.pipe(res);
+        upstream.data.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+
+    } catch (error) {
+        console.error('Stream error:', error.response?.status, error.message);
+        if (!res.headersSent) res.status(500).json({ status: 'error', message: error.message });
     }
 });
 
