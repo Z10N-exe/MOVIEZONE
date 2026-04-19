@@ -111,7 +111,8 @@ export default function Player() {
 
            if (sourcesRes && sourcesRes.length > 0) {
               setSources(sourcesRes);
-              setSourceUrl(sourcesRes[0].directUrl || sourcesRes[0].streamUrl);
+              // URLs are IP-signed — must go through the stream proxy, not direct
+              setSourceUrl(sourcesRes[0].streamUrl);
               setQuality(sourcesRes[0].quality);
            } else {
               setError('No stream sources found for this title.');
@@ -205,7 +206,7 @@ export default function Player() {
 
   const changeQuality = (source) => {
     const time = videoRef.current ? videoRef.current.currentTime : currentTime;
-    setSourceUrl(source.directUrl || source.streamUrl);
+    setSourceUrl(source.streamUrl);
     setQuality(source.quality);
     setShowQualityMenu(false);
     setTimeout(() => {
@@ -251,13 +252,6 @@ export default function Player() {
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onClick={togglePlay}
-          onError={() => {
-            // direct URL failed, fall back to stream proxy
-            if (sources.length > 0 && sourceUrl === (sources[0].directUrl)) {
-              console.warn('Direct URL failed, falling back to stream proxy');
-              setSourceUrl(sources[0].streamUrl);
-            }
-          }}
           playsInline
         />
 
