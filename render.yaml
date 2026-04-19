@@ -8,14 +8,11 @@ services:
     rootDir: moviebox-api1-main
     buildCommand: npm install
     startCommand: node index.js
-    plan: free
     envVars:
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: 10000          # Render assigns this port automatically
       - key: JWT_SECRET
-        generateValue: true   # Render auto-generates a secure random value
+        generateValue: true
 
   # ============================================================
   # 2) FRONTEND — Vite React App (Free Static Site)
@@ -25,14 +22,10 @@ services:
     runtime: static
     buildCommand: npm install && npm run build
     staticPublishPath: dist
-    plan: free
     envVars:
-      # Set this to your actual moviezone-api Render URL after first deploy
-      # e.g. https://moviezone-api.onrender.com
       - key: VITE_API_URL
         value: https://moviezone-api.onrender.com/api
     routes:
-      # SPA fallback — all routes served by index.html
       - type: rewrite
         source: /*
         destination: /index.html
