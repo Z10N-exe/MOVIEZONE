@@ -23,14 +23,10 @@ services:
   # ============================================================
   - type: web
     name: moviezone-frontend
-    runtime: static
+    runtime: node
     plan: free
     buildCommand: npm install && npm run build
-    staticPublishPath: ./dist
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
+    startCommand: node server.js
 
     envVars:
       - key: VITE_API_URL
