@@ -52,10 +52,6 @@ export default function Player() {
   const effectiveSeason = (seasonParam === 0 && episodeParam > 0) ? 1 : seasonParam;
   const effectiveEpisode = episodeParam;
 
-  // Build a play URL for a given quality
-  const buildPlayUrl = (movieId, q) =>
-    `${API_BASE}/play/${movieId}?season=${effectiveSeason}&episode=${effectiveEpisode}&quality=${q}`;
-
   // Fetch sources — validate they exist, then build quality options
   useEffect(() => {
     if (!id || id === 'fallback') return;
@@ -80,14 +76,13 @@ export default function Player() {
           return;
         }
 
-        // Build quality options from actual available resolutions
+        // Use /api/stream/:movieId — fetches fresh signed URL and pipes in same request
         const builtSources = sourcesRes.map(s => ({
           quality: Number(s.quality) || s.quality,
-          streamUrl: buildPlayUrl(targetId, s.quality),
+          streamUrl: `${API_BASE}/stream/${targetId}?season=${effectiveSeason}&episode=${effectiveEpisode}&quality=${Number(s.quality)}`,
         }));
         setSources(builtSources);
 
-        // Pick best default quality (prefer 480, else lowest)
         const preferred = builtSources.find(s => s.quality === 480) || builtSources[0];
         setQuality(preferred.quality);
         setSourceUrl(preferred.streamUrl);
