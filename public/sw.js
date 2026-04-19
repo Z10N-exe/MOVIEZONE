@@ -24,8 +24,7 @@ self.addEventListener('fetch', (event) => {
 
       return fetch(event.request).catch(err => {
         console.warn('Fetch failed for:', event.request.url, err);
-        // Fallback or just return null to let browser handle it
-        return null; 
+        return new Response('Network error', { status: 408, headers: { 'Content-Type': 'text/plain' } });
       });
     })
   );

@@ -91,14 +91,14 @@ const Admin = () => {
   const handleDeleteAd = async (id) => {
     const res = await deleteAd(id);
     if (res.status === 'success') {
-      setAds(ads.filter(a => a.id !== id));
+      setAds(ads.filter(a => (a._id || a.id) !== id));
     }
   };
 
   const handleTogglePremium = async (userId, currentStatus) => {
     const res = await updateUserStatus(userId, { isPremium: !currentStatus });
     if (res.status === 'success') {
-      setUsers(users.map(u => u.id === userId ? { ...u, isPremium: !currentStatus } : u));
+      setUsers(users.map(u => (u._id || u.id) === userId ? { ...u, isPremium: !currentStatus } : u));
     }
   };
 
@@ -268,7 +268,7 @@ const Admin = () => {
                     </thead>
                     <tbody>
                       {users.map(u => (
-                        <tr key={u.id} style={{ borderBottom: '1px solid #222' }}>
+                        <tr key={u._id || u.id} style={{ borderBottom: '1px solid #222' }}>
                           <td style={{ padding: '16px 10px' }}>{u.name}</td>
                           <td>{u.email}</td>
                           <td><span style={{ color: u.role === 'admin' ? 'var(--primary-red)' : '#fff' }}>{u.role}</span></td>
@@ -276,7 +276,7 @@ const Admin = () => {
                           <td>
                             <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
                                <button 
-                                  onClick={() => handleTogglePremium(u.id, u.isPremium)}
+                                  onClick={() => handleTogglePremium(u._id || u.id, u.isPremium)}
                                   style={{ 
                                     color: u.isPremium ? '#f59e0b' : '#34d399', 
                                     background: 'none', 
@@ -308,7 +308,7 @@ const Admin = () => {
                 <h3 style={{ marginBottom: '24px' }}>Current Ads</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                    {ads.map(ad => (
-                      <div key={ad.id} style={{ background: '#222', borderRadius: '12px', padding: '16px', display: 'flex', gap: '16px', position: 'relative' }}>
+                      <div key={ad._id || ad.id} style={{ background: '#222', borderRadius: '12px', padding: '16px', display: 'flex', gap: '16px', position: 'relative' }}>
                          <div style={{ width: '60px', height: '60px', borderRadius: '4px', background: `url(${ad.imageUrl}) center/cover #333` }}></div>
                          <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: 'bold' }}>{ad.title}</div>
@@ -319,7 +319,7 @@ const Admin = () => {
                            size={18} 
                            color="#ef4444" 
                            style={{ cursor: 'pointer', position: 'absolute', top: '16px', right: '16px' }} 
-                           onClick={() => handleDeleteAd(ad.id)}
+                           onClick={() => handleDeleteAd(ad._id || ad.id)}
                          />
                       </div>
                    ))}
