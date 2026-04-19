@@ -4,9 +4,6 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { fetchSources, fetchAds, fetchSearch } from './api';
 import { useAppContext } from './AppContext';
 
-const API_BASE = import.meta.env.VITE_API_URL ||
-  (import.meta.env.PROD ? '/api' : 'https://moviezone-api.onrender.com/api');
-
 const loadHls = () => new Promise((resolve) => {
   if (window.Hls) return resolve();
   const s = document.createElement('script');
@@ -68,11 +65,18 @@ export default function Player() {
           else { setError('Title not found.'); setLoading(false); return; }
         }
 
-        // Call /api/stream/:movieId directly — it fetches sources and streams in one request
-        // This avoids the IP mismatch from two separate requests on Render free tier
-        const builtSources = [360, 480, 720, 1080].map(q => ({
-          quality: q,
-          streamUrl: `${API_BASE}/stream/${targetId}?season=${effectiveSeason}&episode=${effectiveEpisode}&quality=${q}`,
+        // Fetch sources — browser plays directUrl directly (CDN allows browser IPs)
+        const sourcesRes = await fetchSources(targetId, effectiveSeason, effectiveEpisode);
+        if (!sourcesRes?.length) {
+          setError('No stream sources available for this title.');
+          setLoading(false);
+          return;
+        }
+
+        const builtSources = sourcesRes.map(s => ({
+          quality: Number(s.quality) || s.quality,
+          streamUrl: s.directUrl, // browser plays CDN URL directly
+          downloadUrl: s.downloadUrl,
         }));
         setSources(builtSources);
 
