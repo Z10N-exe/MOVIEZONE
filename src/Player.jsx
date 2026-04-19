@@ -48,7 +48,9 @@ export default function Player() {
   const seasonParam = parseInt(searchParams.get('season')) || 0;
   const episodeParam = parseInt(searchParams.get('episode')) || 0;
 
-  // Fetch sources
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://moviezone-api.onrender.com/api';
+
+  // Fetch sources — /api/play fetches a fresh signed URL and proxies in one server-side hop
   useEffect(() => {
     if (!id || id === 'fallback') return;
     setLoading(true);
@@ -63,19 +65,17 @@ export default function Player() {
           else { setError('Title not found.'); setLoading(false); return; }
         }
 
-        const [sourcesRes, adsRes] = await Promise.all([
-          fetchSources(targetId, seasonParam, episodeParam),
-          fetchAds()
-        ]);
+        // Build quality options — /api/play fetches fresh signed URL server-side each time
+        const qualityOptions = [360, 480, 720, 1080];
+        const builtSources = qualityOptions.map(q => ({
+          quality: q,
+          streamUrl: `${API_BASE}/play/${targetId}?season=${seasonParam}&episode=${episodeParam}&quality=${q}`
+        }));
+        setSources(builtSources);
+        setSourceUrl(`${API_BASE}/play/${targetId}?season=${seasonParam}&episode=${episodeParam}&quality=480`);
+        setQuality(480);
 
-        if (sourcesRes?.length > 0) {
-          setSources(sourcesRes);
-          setSourceUrl(sourcesRes[0].streamUrl);
-          setQuality(sourcesRes[0].quality);
-        } else {
-          setError('No stream sources found for this title.');
-        }
-
+        const adsRes = await fetchAds();
         if (adsRes?.status === 'success' && !isPremium) {
           const preRoll = adsRes.data?.find(a => a.placement === 'pre-roll');
           if (preRoll) setActiveAd(preRoll);

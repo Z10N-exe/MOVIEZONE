@@ -745,9 +745,10 @@ app.get('/api/stream', async (req, res) => {
 
         const range = req.headers.range;
         const requestHeaders = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'okhttp/4.12.0',
             'Referer': 'https://fmoviesunblocked.net/',
             'Origin': 'https://fmoviesunblocked.net',
+            'X-Forwarded-For': '1.1.1.1',
         };
         if (range) requestHeaders['Range'] = range;
 
@@ -756,18 +757,17 @@ app.get('/api/stream', async (req, res) => {
             url: streamUrl,
             responseType: 'stream',
             headers: requestHeaders,
-            timeout: 30000,
+            timeout: 60000,
+            maxRedirects: 5,
         });
 
-        // Forward relevant headers
         const forwardHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
         forwardHeaders.forEach(h => {
             if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
         });
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Cache-Control', 'no-cache');
-
-        res.status(range ? (upstream.status === 206 ? 206 : 200) : 200);
+        res.status(upstream.status);
         upstream.data.pipe(res);
 
         upstream.data.on('error', (err) => {
@@ -776,10 +776,69 @@ app.get('/api/stream', async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Streaming proxy error:', error.message);
+        console.error('Streaming proxy error:', error.response?.status, error.message);
         if (!res.headersSent) {
-            res.status(500).json({ status: 'error', message: error.message });
+            res.status(500).json({ status: 'error', message: error.message, upstream: error.response?.status });
         }
+    }
+});
+
+// Direct play endpoint — fetches a fresh signed URL and immediately proxies it
+// Avoids the IP mismatch problem by doing everything in one server-side request chain
+app.get('/api/play/:movieId', async (req, res) => {
+    try {
+        const { movieId } = req.params;
+        const season = parseInt(req.query.season) || 0;
+        const episode = parseInt(req.query.episode) || 0;
+        const qualityPref = parseInt(req.query.quality) || 0;
+
+        // Fetch fresh signed URLs
+        const infoResponse = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/detail`, {
+            method: 'GET', params: { subjectId: movieId }
+        });
+        const movieInfo = processApiResponse(infoResponse);
+        const detailPath = movieInfo?.subject?.detailPath;
+        if (!detailPath) return res.status(404).json({ status: 'error', message: 'Movie not found' });
+
+        const dlResponse = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/download`, {
+            method: 'GET',
+            params: { subjectId: movieId, se: season, ep: episode },
+            headers: {
+                'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
+                'Origin': 'https://fmoviesunblocked.net',
+            }
+        });
+        const dlData = processApiResponse(dlResponse);
+        if (!dlData?.downloads?.length) return res.status(404).json({ status: 'error', message: 'No sources found' });
+
+        // Pick quality
+        let source = dlData.downloads.find(d => d.resolution === qualityPref) || dlData.downloads[0];
+        const streamUrl = source.url;
+
+        console.log(`Direct play: ${movieId} @ ${source.resolution}p`);
+
+        const range = req.headers.range;
+        const headers = {
+            'User-Agent': 'okhttp/4.12.0',
+            'Referer': 'https://fmoviesunblocked.net/',
+            'Origin': 'https://fmoviesunblocked.net',
+        };
+        if (range) headers['Range'] = range;
+
+        const upstream = await axios({ method: 'GET', url: streamUrl, responseType: 'stream', headers, timeout: 60000 });
+
+        ['content-type','content-length','content-range','accept-ranges'].forEach(h => {
+            if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+        });
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.status(upstream.status);
+        upstream.data.pipe(res);
+        upstream.data.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+
+    } catch (error) {
+        console.error('Direct play error:', error.message);
+        if (!res.headersSent) res.status(500).json({ status: 'error', message: error.message });
     }
 });
 
