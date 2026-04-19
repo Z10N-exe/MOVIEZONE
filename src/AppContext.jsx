@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AppContext = createContext();
-const API_URL = 'http://127.0.0.1:5000/api';
+const API_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) || 'http://127.0.0.1:5000/api';
 
 export const useAppContext = () => useContext(AppContext);
 
