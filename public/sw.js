@@ -51,7 +51,8 @@ self.addEventListener('fetch', (event) => {
       if (cached) return cached;
       return fetch(event.request).then(res => {
         if (res.ok && !url.pathname.includes('hot-update')) {
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, res.clone()));
+          const clone = res.clone(); // clone BEFORE any other use
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         }
         return res;
       });

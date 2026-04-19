@@ -679,41 +679,36 @@ app.get('/api/sources/:movieId', async (req, res) => {
         
         const content = processApiResponse(response);
         
-        // Process the sources to extract direct download links with proxy URLs and stream URLs
         if (content && content.downloads) {
-            // Extract title information
             const title = movieInfo?.subject?.title || 'video';
             const isEpisode = season > 0 && episode > 0;
-            
-            // Detect proper protocol
             const protocol = req.get('x-forwarded-proto') || req.protocol;
             const baseUrl = `${protocol}://${req.get('host')}`;
+
+            // Cache the raw download URLs so /api/stream/:movieId can reuse them
+            const cacheKey = `downloads_${movieId}_${season}_${episode}`;
+            apiCache.set(cacheKey, content.downloads, 300); // 5 min cache
             
             const sources = content.downloads.map(file => {
-                // Build download URL with metadata for proper filename
                 const downloadParams = new URLSearchParams({
                     url: file.url,
                     title: title,
                     quality: file.resolution || 'Unknown'
                 });
-                
-                // Add season/episode info if it's a TV show
                 if (isEpisode) {
                     downloadParams.append('season', season);
                     downloadParams.append('episode', episode);
                 }
-                
                 return {
                     id: file.id,
                     quality: file.resolution || 'Unknown',
-                    directUrl: file.url, // Original URL (blocked in browser)
-                    downloadUrl: `${baseUrl}/api/download?${downloadParams.toString()}`, // Proxied download URL with metadata
-                    streamUrl: `${baseUrl}/api/stream?url=${encodeURIComponent(file.url)}`, // Streaming URL with range support
+                    directUrl: file.url,
+                    downloadUrl: `${baseUrl}/api/download?${downloadParams.toString()}`,
+                    streamUrl: `${baseUrl}/api/stream/${movieId}?season=${season}&episode=${episode}&quality=${file.resolution}`,
                     size: file.size,
                     format: 'mp4'
                 };
             });
-            
             content.processedSources = sources;
         }
         
@@ -807,8 +802,81 @@ app.get('/api/stream/:movieId', async (req, res) => {
     }
 });
 
-// Legacy stream proxy (kept for download links)
-app.get('/api/stream', async (req, res) => {
+// Stream endpoint — uses cached signed URLs from /api/sources, fetches fresh only on cache miss
+app.get('/api/stream/:movieId', async (req, res) => {
+    try {
+        const { movieId } = req.params;
+        const season = parseInt(req.query.season) || 0;
+        const episode = parseInt(req.query.episode) || 0;
+        const qualityPref = parseInt(req.query.quality) || 360;
+
+        console.log(`Stream: ${movieId} s${season}e${episode} @${qualityPref}p`);
+
+        // Try cache first — populated by /api/sources
+        const cacheKey = `downloads_${movieId}_${season}_${episode}`;
+        let downloads = apiCache.get(cacheKey);
+
+        if (!downloads) {
+            console.log('Cache miss — fetching fresh signed URLs');
+            const infoRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/detail`, {
+                method: 'GET', params: { subjectId: movieId }
+            });
+            const movieInfo = processApiResponse(infoRes);
+            const detailPath = movieInfo?.subject?.detailPath;
+            if (!detailPath) return res.status(404).json({ status: 'error', message: 'Movie not found' });
+
+            const dlRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/download`, {
+                method: 'GET',
+                params: { subjectId: movieId, se: season, ep: episode },
+                headers: {
+                    'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
+                    'Origin': 'https://fmoviesunblocked.net',
+                }
+            });
+            const dlData = processApiResponse(dlRes);
+            if (!dlData?.downloads?.length) return res.status(404).json({ status: 'error', message: 'No sources' });
+            downloads = dlData.downloads;
+            apiCache.set(cacheKey, downloads, 300);
+        }
+
+        // Pick best quality
+        let source = downloads.find(d => Number(d.resolution) === qualityPref);
+        if (!source) {
+            source = downloads.reduce((prev, curr) =>
+                Math.abs(Number(curr.resolution) - qualityPref) < Math.abs(Number(prev.resolution) - qualityPref) ? curr : prev
+            );
+        }
+
+        console.log(`Piping ${source.resolution}p: ${source.url.substring(0, 80)}...`);
+
+        const range = req.headers.range;
+        const headers = {
+            'User-Agent': 'okhttp/4.12.0',
+            'Referer': 'https://fmoviesunblocked.net/',
+            'Origin': 'https://fmoviesunblocked.net',
+        };
+        if (range) headers['Range'] = range;
+
+        const upstream = await axios({
+            method: 'GET', url: source.url,
+            responseType: 'stream', headers,
+            timeout: 55000, maxRedirects: 5,
+        });
+
+        ['content-type', 'content-length', 'content-range', 'accept-ranges'].forEach(h => {
+            if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+        });
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.status(upstream.status);
+        upstream.data.pipe(res);
+        upstream.data.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+
+    } catch (error) {
+        console.error('Stream error:', error.response?.status, error.message);
+        if (!res.headersSent) res.status(500).json({ status: 'error', message: error.message });
+    }
+});
     try {
         const streamUrl = req.query.url || '';
         if (!streamUrl || !streamUrl.startsWith('http')) {
