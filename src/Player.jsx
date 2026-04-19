@@ -116,7 +116,12 @@ export default function Player() {
       } else {
         video.src = sourceUrl;
         video.load();
-        video.play().catch(() => {});
+        // wait for canplay before calling play() to avoid NotSupportedError
+        const onCanPlay = () => {
+          video.removeEventListener('canplay', onCanPlay);
+          video.play().catch(() => {});
+        };
+        video.addEventListener('canplay', onCanPlay);
       }
     };
 

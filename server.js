@@ -20,6 +20,10 @@ app.use(express.static(distPath, {
         if (filePath.endsWith('.svg'))  res.setHeader('Content-Type', 'image/svg+xml');
         if (filePath.endsWith('.json')) res.setHeader('Content-Type', 'application/json');
         if (filePath.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm');
+        if (filePath.endsWith('.png'))  res.setHeader('Content-Type', 'image/png');
+        if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg')) res.setHeader('Content-Type', 'image/jpeg');
+        if (filePath.endsWith('.webp')) res.setHeader('Content-Type', 'image/webp');
+        if (filePath.endsWith('.ico'))  res.setHeader('Content-Type', 'image/x-icon');
     }
 }));
 
