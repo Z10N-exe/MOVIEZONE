@@ -10,6 +10,9 @@ export const AppProvider = ({ children }) => {
     const [myList, setMyList] = useState(() => {
         try { return JSON.parse(localStorage.getItem('myList')) || []; } catch { return []; }
     });
+    const [downloads, setDownloads] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('downloads')) || []; } catch { return []; }
+    });
 
     const login = (userData, token) => {
         localStorage.setItem('token', token);
@@ -42,8 +45,17 @@ export const AppProvider = ({ children }) => {
 
     const isInMyList = (id) => myList.some(m => m.id === id);
 
+    const addDownload = (item) => {
+        setDownloads(prev => {
+            if (prev.find(d => d.id === item.id)) return prev;
+            const updated = [item, ...prev];
+            localStorage.setItem('downloads', JSON.stringify(updated));
+            return updated;
+        });
+    };
+
     return (
-        <AppContext.Provider value={{ user, setUser, favorites, setFavorites, login, logout, myList, addToMyList, removeFromMyList, isInMyList }}>
+        <AppContext.Provider value={{ user, setUser, favorites, setFavorites, login, logout, myList, addToMyList, removeFromMyList, isInMyList, downloads, addDownload }}>
             {children}
         </AppContext.Provider>
     );

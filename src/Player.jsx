@@ -41,7 +41,8 @@ export default function Player() {
   useEffect(() => {
     let hls;
     const setupPlayer = async () => {
-      if (!sourceUrl || !videoRef.current) return;
+      // wait until loading is done and video element is mounted
+      if (!sourceUrl || !videoRef.current || loading) return;
       
       const isHls = sourceUrl.includes('.m3u8');
       
@@ -49,20 +50,11 @@ export default function Player() {
         await loadHls();
         if (window.Hls.isSupported()) {
           if (hls) hls.destroy();
-          hls = new window.Hls({
-            maxBufferLength: 30,
-            maxMaxBufferLength: 60,
-            enableWorker: true,
-            startLevel: -1,
-            manifestLoadingMaxRetry: 3,
-            xhrSetup: (xhr) => {
-              xhr.withCredentials = true;
-            }
-          });
+          hls = new window.Hls({ maxBufferLength: 30, enableWorker: true, startLevel: -1 });
           hls.loadSource(sourceUrl);
           hls.attachMedia(videoRef.current);
           hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
-             videoRef.current.play().catch(e => console.error("AutoPlay failed:", e));
+            videoRef.current?.play().catch(() => {});
           });
         } else if (videoRef.current.canPlayType('application/vnd.apple.mpegurl')) {
           videoRef.current.src = sourceUrl;
@@ -70,14 +62,12 @@ export default function Player() {
       } else {
         videoRef.current.src = sourceUrl;
         videoRef.current.load();
-        videoRef.current.play().catch(e => console.warn('Autoplay blocked:', e));
+        videoRef.current.play().catch(() => {});
       }
     };
     setupPlayer();
-    return () => {
-      if (hls) hls.destroy();
-    };
-  }, [sourceUrl]);
+    return () => { if (hls) hls.destroy(); };
+  }, [sourceUrl, loading]); // depend on loading so it re-runs once video is mounted
 
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
