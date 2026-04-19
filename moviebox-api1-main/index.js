@@ -825,7 +825,7 @@ app.get('/api/play/:movieId', async (req, res) => {
         };
         if (range) headers['Range'] = range;
 
-        const upstream = await axios({ method: 'GET', url: streamUrl, responseType: 'stream', headers, timeout: 60000 });
+const upstream = await axios({ method: 'GET', url: streamUrl, responseType: 'stream', headers, timeout: 25000 });
 
         ['content-type','content-length','content-range','accept-ranges'].forEach(h => {
             if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);

@@ -1,5 +1,5 @@
 // MovieZone Service Worker for PWA
-const CACHE_NAME = 'moviezone-v2';
+const CACHE_NAME = 'moviezone-v3';
 const ASSETS = [
   '/',
   '/index.html',
@@ -46,12 +46,14 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request).then((cached) => {
       if (cached) return cached;
       return fetch(event.request).then((res) => {
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        // only cache successful responses
+        if (res.ok) {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
         return res;
-      }).catch(() =>
-        new Response('Network error', { status: 408, headers: { 'Content-Type': 'text/plain' } })
-      );
+      });
+      // no .catch() — let the browser show its own network error
     })
   );
 });
