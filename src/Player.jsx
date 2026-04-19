@@ -68,18 +68,11 @@ export default function Player() {
           else { setError('Title not found.'); setLoading(false); return; }
         }
 
-        // Validate sources exist and get available qualities
-        const sourcesRes = await fetchSources(targetId, effectiveSeason, effectiveEpisode);
-        if (!sourcesRes?.length) {
-          setError('No stream sources available for this title.');
-          setLoading(false);
-          return;
-        }
-
-        // Use /api/stream/:movieId — fetches fresh signed URL and pipes in same request
-        const builtSources = sourcesRes.map(s => ({
-          quality: Number(s.quality) || s.quality,
-          streamUrl: `${API_BASE}/stream/${targetId}?season=${effectiveSeason}&episode=${effectiveEpisode}&quality=${Number(s.quality)}`,
+        // Call /api/stream/:movieId directly — it fetches sources and streams in one request
+        // This avoids the IP mismatch from two separate requests on Render free tier
+        const builtSources = [360, 480, 720, 1080].map(q => ({
+          quality: q,
+          streamUrl: `${API_BASE}/stream/${targetId}?season=${effectiveSeason}&episode=${effectiveEpisode}&quality=${q}`,
         }));
         setSources(builtSources);
 

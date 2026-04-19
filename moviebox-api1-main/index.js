@@ -802,58 +802,53 @@ app.get('/api/stream/:movieId', async (req, res) => {
     }
 });
 
-// Stream endpoint — uses cached signed URLs from /api/sources, fetches fresh only on cache miss
+// Stream endpoint — fully self-contained, fetches signed URL and pipes in one request
 app.get('/api/stream/:movieId', async (req, res) => {
     try {
         const { movieId } = req.params;
         const season = parseInt(req.query.season) || 0;
         const episode = parseInt(req.query.episode) || 0;
-        const qualityPref = parseInt(req.query.quality) || 360;
+        const qualityPref = parseInt(req.query.quality) || 480;
 
         console.log(`Stream: ${movieId} s${season}e${episode} @${qualityPref}p`);
 
-        // Try cache first — populated by /api/sources
-        const cacheKey = `downloads_${movieId}_${season}_${episode}`;
-        let downloads = apiCache.get(cacheKey);
+        // Step 1: get detailPath
+        const infoRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/detail`, {
+            method: 'GET', params: { subjectId: movieId }
+        });
+        const movieInfo = processApiResponse(infoRes);
+        const detailPath = movieInfo?.subject?.detailPath;
+        if (!detailPath) return res.status(404).json({ status: 'error', message: 'Movie not found' });
 
-        if (!downloads) {
-            console.log('Cache miss — fetching fresh signed URLs');
-            const infoRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/detail`, {
-                method: 'GET', params: { subjectId: movieId }
-            });
-            const movieInfo = processApiResponse(infoRes);
-            const detailPath = movieInfo?.subject?.detailPath;
-            if (!detailPath) return res.status(404).json({ status: 'error', message: 'Movie not found' });
+        // Step 2: get signed download URLs
+        const dlRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/download`, {
+            method: 'GET',
+            params: { subjectId: movieId, se: season, ep: episode },
+            headers: {
+                'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
+                'Origin': 'https://fmoviesunblocked.net',
+            }
+        });
+        const dlData = processApiResponse(dlRes);
+        if (!dlData?.downloads?.length) return res.status(404).json({ status: 'error', message: 'No sources' });
 
-            const dlRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/download`, {
-                method: 'GET',
-                params: { subjectId: movieId, se: season, ep: episode },
-                headers: {
-                    'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
-                    'Origin': 'https://fmoviesunblocked.net',
-                }
-            });
-            const dlData = processApiResponse(dlRes);
-            if (!dlData?.downloads?.length) return res.status(404).json({ status: 'error', message: 'No sources' });
-            downloads = dlData.downloads;
-            apiCache.set(cacheKey, downloads, 300);
-        }
-
-        // Pick best quality
-        let source = downloads.find(d => Number(d.resolution) === qualityPref);
+        // Step 3: pick quality
+        let source = dlData.downloads.find(d => Number(d.resolution) === qualityPref);
         if (!source) {
-            source = downloads.reduce((prev, curr) =>
+            source = dlData.downloads.reduce((prev, curr) =>
                 Math.abs(Number(curr.resolution) - qualityPref) < Math.abs(Number(prev.resolution) - qualityPref) ? curr : prev
             );
         }
 
-        console.log(`Piping ${source.resolution}p: ${source.url.substring(0, 80)}...`);
+        console.log(`Piping ${source.resolution}p`);
 
+        // Step 4: pipe immediately — same process, same outbound IP as steps 1&2
         const range = req.headers.range;
         const headers = {
             'User-Agent': 'okhttp/4.12.0',
             'Referer': 'https://fmoviesunblocked.net/',
             'Origin': 'https://fmoviesunblocked.net',
+            'Connection': 'keep-alive',
         };
         if (range) headers['Range'] = range;
 
