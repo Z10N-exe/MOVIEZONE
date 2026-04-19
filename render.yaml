@@ -1,11 +1,12 @@
 services:
   # ============================================================
-  # 1) BACKEND — Node.js API (Free Web Service)
+  # 1) BACKEND — Node.js API
   # ============================================================
   - type: web
     name: moviezone-api
     runtime: node
     rootDir: moviebox-api1-main
+    plan: starter
     buildCommand: npm install
     startCommand: node index.js
     envVars:
@@ -15,11 +16,10 @@ services:
         generateValue: true
 
   # ============================================================
-  # 2) FRONTEND — Vite React App (Free Static Site)
+  # 2) FRONTEND — Vite React App (Static Site — always free)
   # ============================================================
-  - type: web
+  - type: static
     name: moviezone-frontend
-    runtime: static
     buildCommand: npm install && npm run build
     staticPublishPath: dist
     envVars:
