@@ -811,8 +811,15 @@ app.get('/api/play/:movieId', async (req, res) => {
         const dlData = processApiResponse(dlResponse);
         if (!dlData?.downloads?.length) return res.status(404).json({ status: 'error', message: 'No sources found' });
 
-        // Pick quality
-        let source = dlData.downloads.find(d => d.resolution === qualityPref) || dlData.downloads[0];
+        // Pick quality — resolution can be string or number, normalize both
+        let source = dlData.downloads.find(d => String(d.resolution) === String(qualityPref));
+        // fallback: pick closest quality
+        if (!source && qualityPref) {
+            source = dlData.downloads.reduce((prev, curr) =>
+                Math.abs(curr.resolution - qualityPref) < Math.abs(prev.resolution - qualityPref) ? curr : prev
+            );
+        }
+        if (!source) source = dlData.downloads[0];
         const streamUrl = source.url;
 
         console.log(`Direct play: ${movieId} @ ${source.resolution}p`);
@@ -825,7 +832,7 @@ app.get('/api/play/:movieId', async (req, res) => {
         };
         if (range) headers['Range'] = range;
 
-const upstream = await axios({ method: 'GET', url: streamUrl, responseType: 'stream', headers, timeout: 25000 });
+const upstream = await axios({ method: 'GET', url: streamUrl, responseType: 'stream', headers, timeout: 55000, maxRedirects: 5 });
 
         ['content-type','content-length','content-range','accept-ranges'].forEach(h => {
             if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
