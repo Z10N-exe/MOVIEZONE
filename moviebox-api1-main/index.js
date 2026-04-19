@@ -1202,20 +1202,23 @@ app.use((err, req, res, next) => {
     });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-    res.status(404).json({
-        status: 'error',
-        message: 'Endpoint not found',
-        availableEndpoints: [
-            'GET /api/homepage',
-            'GET /api/trending',
-            'GET /api/search/:query',
-            'GET /api/info/:movieId',
-            'GET /api/sources/:movieId'
-        ]
+// Serve built React frontend in production
+if (process.env.NODE_ENV === 'production') {
+    const DIST_DIR = path.join(__dirname, '..', 'dist');
+    app.use(express.static(DIST_DIR));
+    // SPA fallback — all non-API routes serve index.html
+    app.get('*', (req, res) => {
+        res.sendFile(path.join(DIST_DIR, 'index.html'));
     });
-});
+} else {
+    // Dev 404 handler
+    app.use('*', (req, res) => {
+        res.status(404).json({
+            status: 'error',
+            message: 'Endpoint not found'
+        });
+    });
+}
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`MovieBox API Server running on http://0.0.0.0:${PORT}`);
