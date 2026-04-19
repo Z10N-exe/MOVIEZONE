@@ -7,6 +7,9 @@ export const AppProvider = ({ children }) => {
         try { return JSON.parse(localStorage.getItem('user')); } catch { return null; }
     });
     const [favorites, setFavorites] = useState([]);
+    const [myList, setMyList] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('myList')) || []; } catch { return []; }
+    });
 
     const login = (userData, token) => {
         localStorage.setItem('token', token);
@@ -20,8 +23,27 @@ export const AppProvider = ({ children }) => {
         setUser(null);
     };
 
+    const addToMyList = (movie) => {
+        setMyList(prev => {
+            if (prev.find(m => m.id === movie.id)) return prev;
+            const updated = [...prev, movie];
+            localStorage.setItem('myList', JSON.stringify(updated));
+            return updated;
+        });
+    };
+
+    const removeFromMyList = (id) => {
+        setMyList(prev => {
+            const updated = prev.filter(m => m.id !== id);
+            localStorage.setItem('myList', JSON.stringify(updated));
+            return updated;
+        });
+    };
+
+    const isInMyList = (id) => myList.some(m => m.id === id);
+
     return (
-        <AppContext.Provider value={{ user, setUser, favorites, setFavorites, login, logout }}>
+        <AppContext.Provider value={{ user, setUser, favorites, setFavorites, login, logout, myList, addToMyList, removeFromMyList, isInMyList }}>
             {children}
         </AppContext.Provider>
     );

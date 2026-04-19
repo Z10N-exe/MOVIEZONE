@@ -1,5 +1,5 @@
 import React from 'react';
-import { Play, Search, Plus, Star } from 'lucide-react';
+import { Play, Search, Plus, Star, Check } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from './AppContext';
 import { fetchTrending, fetchAds, getImageUrl, fetchSources, slugify } from './api';
@@ -27,7 +27,8 @@ const MovieCard = ({ id, imgUrl, isNew }) => {
 
 export default function Home() {
   const navigate = useNavigate();
-  const { addToMyList, isPremium } = useAppContext();
+  const { addToMyList, removeFromMyList, isInMyList, isPremium } = useAppContext();
+  const [listAdded, setListAdded] = React.useState(false);
   const [trending, setTrending] = React.useState([]);
   const [ads, setAds] = React.useState([]);
   const [heroIndex, setHeroIndex] = React.useState(0);
@@ -65,11 +66,21 @@ export default function Home() {
   const featured = trending[heroIndex] || { title: '', thumbnail: '' };
 
   const handleAddToMyList = () => {
-    if (featured.id) {
+    if (!featured.id) return;
+    const inList = isInMyList(featured.id);
+    if (inList) {
+      removeFromMyList(featured.id);
+      setListAdded(false);
+    } else {
       addToMyList({ id: featured.id, title: featured.title, imgUrl: getImageUrl(featured.thumbnail) });
-      alert('Added to My List');
+      setListAdded(true);
     }
   };
+
+  // sync button state when hero changes
+  React.useEffect(() => {
+    setListAdded(featured.id ? isInMyList(featured.id) : false);
+  }, [featured.id]);
 
   const categories = React.useMemo(() => {
     const genreMap = {};
@@ -131,9 +142,19 @@ export default function Home() {
           <button 
              onClick={() => handleAddToMyList()}
              className="hero-button btn-my-list"
-             style={{ flex: 1, boxShadow: '0 8px 25px rgba(0, 0, 0, 0.4)' }}
+             style={{ 
+               flex: 1, 
+               boxShadow: '0 8px 25px rgba(0, 0, 0, 0.4)',
+               backgroundColor: listAdded ? '#1db954' : undefined,
+               borderColor: listAdded ? '#1db954' : undefined,
+               transition: 'background-color 0.3s, border-color 0.3s',
+               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
+             }}
           >
-            <Plus size={22} /> My List
+            {listAdded 
+              ? <><Check size={22} strokeWidth={3} /> Added</>
+              : <><Plus size={22} /> My List</>
+            }
           </button>
         </div>
       </div>
