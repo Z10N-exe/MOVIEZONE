@@ -1,21 +1,17 @@
-// MovieZone Service Worker for PWA
-const CACHE_NAME = 'moviezone-v4';
-const ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json'
-];
+const CACHE_NAME = 'moviezone-v5';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    fetch('/index.html')
+      .then(res => caches.open(CACHE_NAME).then(cache => cache.put('/index.html', res)))
+      .catch(() => {}) // ignore if offline during install
   );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
+    caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     )
   );
@@ -25,42 +21,40 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Don't intercept: non-GET, API calls, or cross-origin requests
+  // skip non-GET and cross-origin
   if (event.request.method !== 'GET') return;
-  if (url.pathname.startsWith('/api/')) return;
   if (url.origin !== self.location.origin) return;
 
-  // For navigation requests (HTML pages), always go network-first
+  // skip API calls — never cache or intercept these
+  if (url.pathname.startsWith('/api/')) return;
+
+  // navigation requests — network first, fall back to cached index.html
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
         .then(res => {
-          // cache the page for offline fallback
           const clone = res.clone();
           caches.open(CACHE_NAME).then(cache => cache.put('/index.html', clone));
           return res;
         })
-        .catch(async () => {
-          const cached = await caches.match('/index.html');
-          return cached || new Response('<h1>Offline</h1>', { headers: { 'Content-Type': 'text/html' } });
-        })
+        .catch(() => caches.match('/index.html').then(cached =>
+          cached || new Response('<!DOCTYPE html><html><body><h2>Offline - please reconnect</h2></body></html>',
+            { headers: { 'Content-Type': 'text/html' } })
+        ))
     );
     return;
   }
 
-  // For static assets, cache-first
+  // static assets — cache first, then network
   event.respondWith(
-    caches.match(event.request).then((cached) => {
+    caches.match(event.request).then(cached => {
       if (cached) return cached;
-      return fetch(event.request).then((res) => {
-        // only cache successful responses
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+      return fetch(event.request).then(res => {
+        if (res.ok && !url.pathname.includes('hot-update')) {
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, res.clone()));
         }
         return res;
       });
-      // no .catch() — let the browser show its own network error
     })
   );
 });
