@@ -97,7 +97,12 @@ export const signupUser = async (data) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data)
     });
-    return res.json();
+    const json = await res.json();
+    if (!res.ok && !json.status) {
+        json.status = 'error';
+        json.message = json.message || 'Signup failed. Please try again.';
+    }
+    return json;
 };
 
 export const fetchAds = async () => {

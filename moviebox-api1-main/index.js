@@ -3,20 +3,17 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const { wrapper } = require('axios-cookiejar-support');
 const { CookieJar } = require('tough-cookie');
-const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const { connectDB, User, Ad, Content, Settings, Analytics } = require('./db');
 
-const JWT_SECRET = 'moviezone_premium_secret_key_999';
+const JWT_SECRET = process.env.JWT_SECRET || 'moviezone_premium_secret_key_999';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// --- DATABASE HELPERS ---
-const DATA_DIR = path.join(__dirname, 'data');
-const readData = (file) => JSON.parse(fs.readFileSync(path.join(DATA_DIR, file), 'utf8'));
-const writeData = (file, data) => fs.writeFileSync(path.join(DATA_DIR, file), JSON.stringify(data, null, 2));
+connectDB();
 
 // Simple in-memory cache
 const apiCache = {
@@ -42,22 +39,19 @@ const apiCache = {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
     
-    // Check maintenance mode for non-admin API requests
     if (req.url.startsWith('/api/') && !req.url.startsWith('/api/auth/') && !req.url.startsWith('/api/admin/')) {
         try {
-            const settings = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'settings.json'), 'utf8'));
-            if (settings.maintenanceMode) {
+            const settings = await Settings.findOne();
+            if (settings?.maintenanceMode) {
                 return res.status(503).json({ 
                     status: 'error', 
                     message: 'MovieZone is currently undergoing maintenance. Please check back later.' 
                 });
             }
-        } catch (e) {
-            // Settings file might not exist yet, ignore
-        }
+        } catch (e) { /* ignore */ }
     }
     next();
 });
@@ -1026,28 +1020,25 @@ const isAdmin = (req, res, next) => {
 app.post('/api/auth/signup', async (req, res) => {
     try {
         const { name, email, password } = req.body;
-        let users = readData('users.json');
-        
-        if (users.find(u => u.email === email)) {
+        if (!name || !email || !password)
+            return res.status(400).json({ status: 'error', message: 'All fields are required' });
+
+        const existing = await User.findOne({ email: email.toLowerCase() });
+        if (existing)
             return res.status(400).json({ status: 'error', message: 'User already exists' });
-        }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = {
-            id: Date.now().toString(),
+        const userCount = await User.countDocuments();
+        const newUser = await User.create({
             name,
             email,
             password: hashedPassword,
-            role: users.length === 0 ? 'admin' : 'user', // First user is admin
+            role: userCount === 0 ? 'admin' : 'user',
             isPremium: false,
-            createdAt: new Date().toISOString()
-        };
+        });
 
-        users.push(newUser);
-        writeData('users.json', users);
-
-        const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ status: 'success', token, user: { id: newUser.id, name, email, role: newUser.role, isPremium: false } });
+        const token = jwt.sign({ id: newUser._id, role: newUser.role }, JWT_SECRET, { expiresIn: '7d' });
+        res.json({ status: 'success', token, user: { id: newUser._id, name, email, role: newUser.role, isPremium: false } });
     } catch (error) {
         res.status(500).json({ status: 'error', message: error.message });
     }
@@ -1056,140 +1047,124 @@ app.post('/api/auth/signup', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const users = readData('users.json');
-        const user = users.find(u => u.email === email);
+        if (!email || !password)
+            return res.status(400).json({ status: 'error', message: 'Email and password are required' });
 
-        if (!user || !(await bcrypt.compare(password, user.password))) {
+        const user = await User.findOne({ email: email.toLowerCase() });
+        if (!user || !(await bcrypt.compare(password, user.password)))
             return res.status(401).json({ status: 'error', message: 'Invalid credentials' });
-        }
 
-        const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
-        res.json({ status: 'success', token, user: { id: user.id, name: user.name, email: user.email, role: user.role, isPremium: user.isPremium } });
+        const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+        res.json({ status: 'success', token, user: { id: user._id, name: user.name, email: user.email, role: user.role, isPremium: user.isPremium } });
     } catch (error) {
         res.status(500).json({ status: 'error', message: error.message });
     }
 });
 
-// Get current logged-in user (for syncing isPremium etc.)
-app.get('/api/auth/me', authenticateToken, (req, res) => {
+app.get('/api/auth/me', authenticateToken, async (req, res) => {
     try {
-        const users = readData('users.json');
-        const user = users.find(u => u.id === req.user.id);
+        const user = await User.findById(req.user.id).select('-password');
         if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-        res.json({ status: 'success', user: { id: user.id, name: user.name, email: user.email, role: user.role, isPremium: user.isPremium } });
+        res.json({ status: 'success', user: { id: user._id, name: user.name, email: user.email, role: user.role, isPremium: user.isPremium } });
     } catch (error) {
         res.status(500).json({ status: 'error', message: error.message });
     }
 });
 
 // --- ADMIN ROUTES ---
-app.get('/api/admin/stats', authenticateToken, isAdmin, (req, res) => {
-    const users = readData('users.json');
-    const analytics = readData('analytics.json');
-    const ads = readData('ads.json');
-    
+app.get('/api/admin/stats', authenticateToken, isAdmin, async (req, res) => {
+    const [totalUsers, premiumUsers, analytics, ads] = await Promise.all([
+        User.countDocuments(),
+        User.countDocuments({ isPremium: true }),
+        Analytics.findOne(),
+        Ad.find({ active: true }),
+    ]);
+    const recentSignups = await User.find().sort({ createdAt: -1 }).limit(5).select('-password');
     res.json({
         status: 'success',
         data: {
-            totalUsers: users.length,
-            premiumUsers: users.filter(u => u.isPremium).length,
-            revenue: analytics.revenue || 0,
-            activeAds: ads.filter(a => a.active).length,
-            recentSignups: users.slice(-5).reverse()
+            totalUsers,
+            premiumUsers,
+            revenue: analytics?.revenue || 0,
+            activeAds: ads.length,
+            recentSignups,
         }
     });
 });
 
-app.get('/api/admin/users', authenticateToken, isAdmin, (req, res) => {
-    const users = readData('users.json');
-    res.json({ status: 'success', data: users.map(({password, ...u}) => u) });
+app.get('/api/admin/users', authenticateToken, isAdmin, async (req, res) => {
+    const users = await User.find().select('-password');
+    res.json({ status: 'success', data: users });
 });
 
-app.patch('/api/admin/users/:id', authenticateToken, isAdmin, (req, res) => {
-    const { id } = req.params;
+app.patch('/api/admin/users/:id', authenticateToken, isAdmin, async (req, res) => {
     const { isPremium, role } = req.body;
-    let users = readData('users.json');
-    const userIndex = users.findIndex(u => u.id === id);
-
-    if (userIndex === -1) {
-        return res.status(404).json({ status: 'error', message: 'User not found' });
-    }
-
-    if (isPremium !== undefined) users[userIndex].isPremium = isPremium;
-    if (role !== undefined) users[userIndex].role = role;
-
-    writeData('users.json', users);
-    res.json({ status: 'success', data: { id, isPremium: users[userIndex].isPremium, role: users[userIndex].role } });
+    const update = {};
+    if (isPremium !== undefined) update.isPremium = isPremium;
+    if (role !== undefined) update.role = role;
+    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
+    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+    res.json({ status: 'success', data: user });
 });
 
-app.post('/api/admin/ads', authenticateToken, isAdmin, (req, res) => {
-    const ad = { ...req.body, id: Date.now().toString(), active: true };
-    let ads = readData('ads.json');
-    ads.push(ad);
-    writeData('ads.json', ads);
+app.post('/api/admin/ads', authenticateToken, isAdmin, async (req, res) => {
+    const ad = await Ad.create({ ...req.body, active: true });
     res.json({ status: 'success', data: ad });
 });
 
-app.delete('/api/admin/ads/:id', authenticateToken, isAdmin, (req, res) => {
-    let ads = readData('ads.json');
-    ads = ads.filter(a => a.id !== req.params.id);
-    writeData('ads.json', ads);
+app.delete('/api/admin/ads/:id', authenticateToken, isAdmin, async (req, res) => {
+    await Ad.findByIdAndDelete(req.params.id);
     res.json({ status: 'success', message: 'Ad deleted' });
 });
 
 // --- CONTENT MANAGEMENT ---
-app.get('/api/admin/content', authenticateToken, isAdmin, (req, res) => {
-    const content = readData('content.json');
+app.get('/api/admin/content', authenticateToken, isAdmin, async (req, res) => {
+    let content = await Content.findOne();
+    if (!content) content = await Content.create({ featured: [] });
     res.json({ status: 'success', data: content });
 });
 
-app.post('/api/admin/content/featured', authenticateToken, isAdmin, (req, res) => {
+app.post('/api/admin/content/featured', authenticateToken, isAdmin, async (req, res) => {
     const movie = req.body;
-    let content = readData('content.json');
+    let content = await Content.findOne();
+    if (!content) content = await Content.create({ featured: [] });
     if (!content.featured.find(f => f.id === movie.id)) {
         content.featured.push(movie);
-        writeData('content.json', content);
+        await content.save();
     }
     res.json({ status: 'success', data: movie });
 });
 
-app.delete('/api/admin/content/featured/:id', authenticateToken, isAdmin, (req, res) => {
-    const { id } = req.params;
-    let content = readData('content.json');
-    content.featured = content.featured.filter(f => f.id !== id);
-    writeData('content.json', content);
+app.delete('/api/admin/content/featured/:id', authenticateToken, isAdmin, async (req, res) => {
+    const content = await Content.findOne();
+    if (content) {
+        content.featured = content.featured.filter(f => f.id !== req.params.id);
+        await content.save();
+    }
     res.json({ status: 'success', message: 'Removed from featured' });
 });
 
 // --- SETTINGS ---
-app.get('/api/admin/settings', authenticateToken, isAdmin, (req, res) => {
-    let settings;
-    try {
-        settings = readData('settings.json');
-    } catch (e) {
-        settings = { siteName: 'MovieZone', maintenanceMode: false, premiumPrice: 1000 };
-    }
+app.get('/api/admin/settings', authenticateToken, isAdmin, async (req, res) => {
+    let settings = await Settings.findOne();
+    if (!settings) settings = await Settings.create({});
     res.json({ status: 'success', data: settings });
 });
 
-app.post('/api/admin/settings', authenticateToken, isAdmin, (req, res) => {
-    writeData('settings.json', req.body);
-    res.json({ status: 'success', data: req.body });
+app.post('/api/admin/settings', authenticateToken, isAdmin, async (req, res) => {
+    const settings = await Settings.findOneAndUpdate({}, req.body, { upsert: true, new: true });
+    res.json({ status: 'success', data: settings });
 });
 
 // --- PUBLIC ADS ---
-app.get('/api/ads', (req, res) => {
-    const ads = readData('ads.json');
-    res.json({ status: 'success', data: ads.filter(a => a.active) });
+app.get('/api/ads', async (req, res) => {
+    const ads = await Ad.find({ active: true });
+    res.json({ status: 'success', data: ads });
 });
 
-app.get('/api/settings', (req, res) => {
-    try {
-        const settings = readData('settings.json');
-        res.json({ status: 'success', data: { siteName: settings.siteName, maintenanceMode: settings.maintenanceMode } });
-    } catch (e) {
-        res.json({ status: 'success', data: { siteName: 'MovieZone', maintenanceMode: false } });
-    }
+app.get('/api/settings', async (req, res) => {
+    const settings = await Settings.findOne();
+    res.json({ status: 'success', data: { siteName: settings?.siteName || 'MovieZone', maintenanceMode: settings?.maintenanceMode || false } });
 });
 
 // Error handling middleware

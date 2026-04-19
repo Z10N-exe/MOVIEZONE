@@ -24,10 +24,10 @@ export default function Auth() {
         login(res.user, res.token);
         navigate(res.user.role === 'admin' ? '/admin' : '/');
       } else {
-        setError(res.message);
+        setError(res.message || 'Signup failed. Please try again.');
       }
     } catch (err) {
-      setError('Something went wrong. Please try again.');
+      setError(err.message || 'Something went wrong. Please try again.');
     }
   };
 
