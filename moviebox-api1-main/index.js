@@ -732,170 +732,53 @@ app.get('/api/sources/:movieId', async (req, res) => {
     }
 });
 
-// Streaming proxy endpoint - handles range requests for video playback with seeking support
+// Streaming proxy endpoint
 app.get('/api/stream', async (req, res) => {
     try {
-        // Express already decodes query params, so use req.query.url directly to avoid double-decoding
         const streamUrl = req.query.url || '';
-        
-        if (!streamUrl || (!streamUrl.includes('hakunaymatata.com') && !streamUrl.includes('moviebox'))) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Invalid stream URL'
-            });
-        }
-        
-        console.log(`Streaming video: ${streamUrl.substring(0, 100)}...`);
-        
-        // Check if client sent a Range header for seeking/partial content
-        const range = req.headers.range;
-        
-        // Get the file size with caching
-        const cacheKey = `header_${streamUrl}`;
-        const cachedHeaders = apiCache.get(cacheKey);
 
-        let fileSize = null;
-        let contentType = 'video/mp4';
-        
-        if (cachedHeaders) {
-            fileSize = cachedHeaders.fileSize;
-            contentType = cachedHeaders.contentType;
-        } else {
-            try {
-                const headResponse = await axios({
-                    method: 'HEAD',
-                    url: streamUrl,
-                    headers: {
-                        'User-Agent': 'okhttp/4.12.0',
-                        'Referer': 'https://fmoviesunblocked.net/',
-                        'Origin': 'https://fmoviesunblocked.net'
-                    }
-                });
-                
-                fileSize = parseInt(headResponse.headers['content-length']);
-                contentType = headResponse.headers['content-type'] || contentType;
-                
-                if (fileSize && !isNaN(fileSize)) {
-                    apiCache.set(cacheKey, { fileSize, contentType }, 3600); // Cache for 1 hour
-                }
-            } catch (headError) {
-                console.log('HEAD failed, using partial GET');
-                const testResponse = await axios({
-                    method: 'GET',
-                    url: streamUrl,
-                    responseType: 'stream',
-                    headers: {
-                        'User-Agent': 'okhttp/4.12.0',
-                        'Range': 'bytes=0-0'
-                    }
-                });
-                if (testResponse.data) testResponse.data.destroy();
-                const contentRange = testResponse.headers['content-range'];
-                if (contentRange) {
-                    const match = contentRange.match(/bytes \d+-\d+\/(\d+)/);
-                    if (match) fileSize = parseInt(match[1]);
-                }
-                contentType = testResponse.headers['content-type'] || contentType;
-                if (fileSize && !isNaN(fileSize)) {
-                    apiCache.set(cacheKey, { fileSize, contentType }, 3600);
-                }
-            }
+        if (!streamUrl || !streamUrl.startsWith('http')) {
+            return res.status(400).json({ status: 'error', message: 'Invalid stream URL' });
         }
-        
-        if (!fileSize || isNaN(fileSize)) {
-            throw new Error('Could not determine file size');
-        }
-        
-        if (range) {
-            // Parse range header with validation
-            const parts = range.replace(/bytes=/, '').split('-');
-            let start = parseInt(parts[0], 10);
-            let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-            
-            // Handle suffix-byte-range (e.g., "bytes=-500" means last 500 bytes)
-            if (isNaN(start) && !isNaN(end)) {
-                start = fileSize - end;
-                end = fileSize - 1;
-            }
-            
-            // Validate range
-            if (isNaN(start) || isNaN(end) || start < 0 || end >= fileSize || start > end) {
-                return res.status(416).set({
-                    'Content-Range': `bytes */${fileSize}`
-                }).json({
-                    status: 'error',
-                    message: 'Range not satisfiable'
-                });
-            }
-            
-            const chunkSize = (end - start) + 1;
-            
-            console.log(`Range request: bytes ${start}-${end}/${fileSize}`);
-            
-            // Make request with Range header to CDN
-            const response = await axios({
-                method: 'GET',
-                url: streamUrl,
-                responseType: 'stream',
-                headers: {
-                    'User-Agent': 'okhttp/4.12.0',
-                    'Referer': 'https://fmoviesunblocked.net/',
-                    'Origin': 'https://fmoviesunblocked.net',
-                    'Range': `bytes=${start}-${end}`
-                }
-            });
-            
-            // Set 206 Partial Content headers
-            res.status(206);
-            res.set({
-                'Content-Type': contentType,
-                'Content-Length': chunkSize,
-                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-                'Accept-Ranges': 'bytes',
-                'Cache-Control': 'no-cache'
-            });
-            
-            // Pipe the video stream chunk to the response
-            response.data.pipe(res);
-            
-        } else {
-            // No range request, stream the entire file
-            console.log(`Streaming full file: ${fileSize} bytes`);
-            
-            const response = await axios({
-                method: 'GET',
-                url: streamUrl,
-                responseType: 'stream',
-                headers: {
-                    'User-Agent': 'okhttp/4.12.0',
-                    'Referer': 'https://fmoviesunblocked.net/',
-                    'Origin': 'https://fmoviesunblocked.net'
-                }
-            });
-            
-            // Set full content headers
-            res.status(200);
-            res.set({
-                'Content-Type': contentType,
-                'Content-Length': fileSize,
-                'Accept-Ranges': 'bytes',
-                'Cache-Control': 'no-cache'
-            });
-            
-            // Pipe the video stream to the response
-            response.data.pipe(res);
-        }
-        
+
+        console.log(`Proxying stream: ${streamUrl.substring(0, 120)}...`);
+
+        const range = req.headers.range;
+        const requestHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://fmoviesunblocked.net/',
+            'Origin': 'https://fmoviesunblocked.net',
+        };
+        if (range) requestHeaders['Range'] = range;
+
+        const upstream = await axios({
+            method: 'GET',
+            url: streamUrl,
+            responseType: 'stream',
+            headers: requestHeaders,
+            timeout: 30000,
+        });
+
+        // Forward relevant headers
+        const forwardHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
+        forwardHeaders.forEach(h => {
+            if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+        });
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+
+        res.status(range ? (upstream.status === 206 ? 206 : 200) : 200);
+        upstream.data.pipe(res);
+
+        upstream.data.on('error', (err) => {
+            console.error('Stream pipe error:', err.message);
+            if (!res.headersSent) res.status(500).end();
+        });
+
     } catch (error) {
         console.error('Streaming proxy error:', error.message);
-        
-        // Send error only if headers haven't been sent
         if (!res.headersSent) {
-            res.status(500).json({
-                status: 'error',
-                message: 'Failed to stream video',
-                error: error.message
-            });
+            res.status(500).json({ status: 'error', message: error.message });
         }
     }
 });

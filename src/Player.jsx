@@ -102,7 +102,9 @@ export default function Player() {
          ]);
          if (sourcesRes && sourcesRes.length > 0) {
             setSources(sourcesRes);
-            setSourceUrl(sourcesRes[0].streamUrl);
+            // prefer directUrl — signed CDN URLs work best played directly
+            // fall back to streamUrl proxy if directUrl is blocked
+            setSourceUrl(sourcesRes[0].directUrl || sourcesRes[0].streamUrl);
             setQuality(sourcesRes[0].quality);
          }
          if (adsRes.status === 'success' && !isPremium) {
@@ -188,10 +190,9 @@ export default function Player() {
 
   const changeQuality = (source) => {
     const time = videoRef.current ? videoRef.current.currentTime : currentTime;
-    setSourceUrl(source.streamUrl);
+    setSourceUrl(source.directUrl || source.streamUrl);
     setQuality(source.quality);
     setShowQualityMenu(false);
-    // Note: useEffect(sourceUrl) handles the reload
     setTimeout(() => {
         if (videoRef.current) videoRef.current.currentTime = time;
     }, 500);
@@ -231,6 +232,13 @@ export default function Player() {
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onClick={togglePlay}
+          onError={() => {
+            // direct URL failed, fall back to stream proxy
+            if (sources.length > 0 && sourceUrl === (sources[0].directUrl)) {
+              console.warn('Direct URL failed, falling back to stream proxy');
+              setSourceUrl(sources[0].streamUrl);
+            }
+          }}
           playsInline
         />
 
