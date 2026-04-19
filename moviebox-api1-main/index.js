@@ -753,6 +753,9 @@ app.get('/api/stream', async (req, res) => {
         // Get the file size with caching
         const cacheKey = `header_${streamUrl}`;
         const cachedHeaders = apiCache.get(cacheKey);
+
+        let fileSize = null;
+        let contentType = 'video/mp4';
         
         if (cachedHeaders) {
             fileSize = cachedHeaders.fileSize;

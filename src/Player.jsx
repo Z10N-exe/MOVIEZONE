@@ -68,6 +68,8 @@ export default function Player() {
         }
       } else {
         videoRef.current.src = sourceUrl;
+        videoRef.current.load();
+        videoRef.current.play().catch(e => console.warn('Autoplay blocked:', e));
       }
     };
     setupPlayer();
@@ -229,7 +231,6 @@ export default function Player() {
           onPlay={() => setIsPlaying(true)}
           onPause={() => setIsPlaying(false)}
           onClick={togglePlay}
-          autoPlay
           playsInline
         />
 
