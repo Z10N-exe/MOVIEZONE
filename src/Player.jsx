@@ -33,6 +33,7 @@ export default function Player() {
   const [isMuted, setIsMuted] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [ads, setAds] = useState([]);
   const [activeAd, setActiveAd] = useState(null);
   const [adShown, setAdShown] = useState({});
@@ -86,33 +87,47 @@ export default function Player() {
   useEffect(() => {
     if (id && id !== 'fallback') {
       setLoading(true);
+      setError(null);
       
       const resolveAndFetch = async () => {
-         let targetId = id;
-         if (!/^\d+$/.test(id)) {
-            const searchRes = await fetchSearch(id.replace(/-/g, ' '));
-            if (searchRes && searchRes.length > 0) {
-               targetId = searchRes[0].id;
-            }
-         }
+         try {
+           let targetId = id;
+           // only search if it's a slug, not a numeric ID
+           if (!/^\d+$/.test(id)) {
+              const searchRes = await fetchSearch(id.replace(/-/g, ' '));
+              if (searchRes && searchRes.length > 0) {
+                 targetId = searchRes[0].id;
+              } else {
+                 setError('Could not find this title. Try searching for it.');
+                 setLoading(false);
+                 return;
+              }
+           }
 
-         const [sourcesRes, adsRes] = await Promise.all([
-            fetchSources(targetId, seasonParam, episodeParam), 
-            fetchAds()
-         ]);
-         if (sourcesRes && sourcesRes.length > 0) {
-            setSources(sourcesRes);
-            // prefer directUrl — signed CDN URLs work best played directly
-            // fall back to streamUrl proxy if directUrl is blocked
-            setSourceUrl(sourcesRes[0].directUrl || sourcesRes[0].streamUrl);
-            setQuality(sourcesRes[0].quality);
+           const [sourcesRes, adsRes] = await Promise.all([
+              fetchSources(targetId, seasonParam, episodeParam), 
+              fetchAds()
+           ]);
+
+           if (sourcesRes && sourcesRes.length > 0) {
+              setSources(sourcesRes);
+              setSourceUrl(sourcesRes[0].directUrl || sourcesRes[0].streamUrl);
+              setQuality(sourcesRes[0].quality);
+           } else {
+              setError('No stream sources found for this title.');
+           }
+
+           if (adsRes.status === 'success' && !isPremium) {
+              setAds(adsRes.data);
+              const preRoll = adsRes.data.find(a => a.placement === 'pre-roll');
+              if (preRoll) setActiveAd(preRoll);
+           }
+         } catch (e) {
+           setError('Failed to load stream. Please try again.');
+           console.error(e);
+         } finally {
+           setLoading(false);
          }
-         if (adsRes.status === 'success' && !isPremium) {
-            setAds(adsRes.data);
-            const preRoll = adsRes.data.find(a => a.placement === 'pre-roll');
-            if (preRoll) setActiveAd(preRoll);
-         }
-         setLoading(false);
       };
 
       resolveAndFetch();
@@ -217,15 +232,19 @@ export default function Player() {
        onMouseMove={() => setShowControls(true)}
     >
       {loading ? (
-        <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
             <div className="spinner"></div>
-            <p style={{ marginLeft: 15 }}>Optimizing Stream...</p>
+            <p style={{ color: '#aaa' }}>Loading stream...</p>
+        </div>
+      ) : error ? (
+        <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16, padding: 20, textAlign: 'center' }}>
+            <p style={{ color: '#ff4444', fontSize: 18 }}>{error}</p>
+            <button onClick={() => navigate(-1)} style={{ padding: '10px 24px', borderRadius: 8, background: 'var(--primary-red)', border: 'none', color: '#fff', cursor: 'pointer' }}>Go Back</button>
         </div>
       ) : (
       <>
         <video 
           ref={videoRef}
-          crossOrigin="anonymous"
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}

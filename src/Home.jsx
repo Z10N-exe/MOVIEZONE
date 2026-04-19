@@ -133,7 +133,7 @@ export default function Home() {
         {/* Hero Actions */}
         <div style={{ position: 'absolute', bottom: 40, left: 20, right: 20, display: 'flex', gap: 15 }}>
           <button 
-             onClick={() => navigate(`/player/${slugify(featured.title || featured.name)}`)}
+             onClick={() => navigate(`/player/${featured.id || slugify(featured.title || featured.name)}`)}
              className="hero-button button-primary"
              style={{ flex: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', boxShadow: '0 8px 25px rgba(229, 9, 20, 0.4)' }}
           >

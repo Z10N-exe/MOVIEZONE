@@ -131,7 +131,7 @@ const MovieDetails = () => {
         <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
           <button 
             onClick={() => {
-              const base = `/player/${slugify(movie.title || movie.name)}`;
+              const base = `/player/${targetId}`;
               const isSeries = movie.subjectType === 2 || seasonsData.length > 0;
               if (isSeries) {
                 navigate(`${base}?season=${selectedSeason}&episode=${selectedEpisode}`);
