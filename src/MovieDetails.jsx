@@ -147,17 +147,22 @@ const MovieDetails = () => {
             <button 
               onClick={() => {
                 if (sources.length > 0) {
-                  alert('Starting download...');
                   addDownload({ 
                     id: targetId, 
                     title: movie.title || movie.name, 
                     imgUrl: getImageUrl(movie.poster_path || movie.thumbnail),
-                    duration: movie.duration || (movie.runtime ? `${Math.floor(movie.runtime / 60)}h ${movie.runtime % 60}m` : ''),
+                    duration: movie.duration || '',
                     size: sources[0].size || '',
                     season: (movie.subjectType === 2 || seasonsData.length > 0) ? selectedSeason : null,
                     episode: (movie.subjectType === 2 || seasonsData.length > 0) ? selectedEpisode : null
                   });
-                  window.open(sources[0].downloadUrl, '_blank');
+                  // Create a hidden anchor and click it for proper download
+                  const a = document.createElement('a');
+                  a.href = sources[0].downloadUrl;
+                  a.download = `${movie.title || 'video'}.mp4`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
                 } else {
                   alert('No download links found for this title');
                 }

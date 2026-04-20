@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Play, TrendingUp } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { fetchSearch, fetchTrending, getImageUrl, slugify } from './api';
+import { fetchSearch, fetchGenre, fetchTrending, getImageUrl } from './api';
 
 const CATEGORIES = ['Action', 'Comedy', 'Drama', 'Anime', 'Sci-Fi', 'Horror', 'Romance', 'Thriller', 'Adventure', 'Mystery'];
 
@@ -12,7 +12,7 @@ const MasonryCard = ({ movie, index }) => {
 
   return (
     <div
-      onClick={() => navigate(`/movie/${slugify(movie.title || movie.name)}`)}
+      onClick={() => navigate(`/movie/${movie.id}`)}
       className="masonry-card"
       style={{ cursor: 'pointer' }}
     >
@@ -70,6 +70,7 @@ const Explore = () => {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [activeGenre, setActiveGenre] = useState(null);
   const [recommendations, setRecommendations] = useState([]);
   const [recsLoading, setRecsLoading] = useState(true);
 
@@ -87,20 +88,25 @@ const Explore = () => {
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
       if (query.trim()) {
+        setActiveGenre(null);
         setLoading(true);
-        fetchSearch(query).then(data => {
-          setResults(data);
-          setLoading(false);
-        });
-      } else {
+        fetchSearch(query).then(data => { setResults(data); setLoading(false); });
+      } else if (!activeGenre) {
         setResults([]);
       }
     }, 250);
-
     return () => clearTimeout(delayDebounceFn);
   }, [query]);
 
-  const showDefault = results.length === 0 && !loading;
+  // Genre filter — uses /api/genre/:genre not text search
+  const handleGenreClick = (genre) => {
+    setQuery('');
+    setActiveGenre(genre);
+    setLoading(true);
+    fetchGenre(genre).then(data => { setResults(data); setLoading(false); });
+  };
+
+  const showDefault = results.length === 0 && !loading && !activeGenre;
 
   return (
     <div className="page-container" style={{ paddingBottom: '80px', color: 'white' }}>
@@ -150,7 +156,9 @@ const Explore = () => {
             <h3 style={{ marginBottom: 12, fontSize: 16, fontWeight: 600, color: '#eee' }}>Categories</h3>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: 28 }}>
               {CATEGORIES.map(cat => (
-                <div key={cat} onClick={() => setQuery(cat)} className="category-chip">
+                <div key={cat} onClick={() => handleGenreClick(cat)}
+                  className="category-chip"
+                  style={{ backgroundColor: activeGenre === cat ? 'var(--primary-red)' : undefined }}>
                   {cat}
                 </div>
               ))}

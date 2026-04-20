@@ -126,13 +126,24 @@ async function handleTrending(url) {
 
 async function handleSearch(query, url) {
     const u = new URL(url);
+    const subjectType = parseInt(u.searchParams.get('type')) || 0;
+    const genre = u.searchParams.get('genre'); // genre filter
+
     const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: query, page: 1, perPage: 24, subjectType: 0 }),
+        body: JSON.stringify({ keyword: genre ? '' : query, page: 1, perPage: 24, subjectType }),
     });
     const data = processResponse(await r.json());
-    if (data.items) data.items = data.items.map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+    if (data.items) {
+        // If genre filter, filter by genre field instead of searching by name
+        if (genre) {
+            data.items = data.items.filter(i =>
+                i.genre && i.genre.toLowerCase().split(',').map(g => g.trim()).includes(genre.toLowerCase())
+            );
+        }
+        data.items = data.items.map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+    }
     return json({ status: 'success', data });
 }
 
@@ -353,6 +364,11 @@ export default {
             if (path === '/api/trending') return handleTrending(request.url);
             if (path === '/api/homepage') return handleHomepage();
             if (path.startsWith('/api/search/')) return handleSearch(decodeURIComponent(path.split('/api/search/')[1]), request.url);
+            // Genre browse: /api/genre/Action
+            if (path.startsWith('/api/genre/')) {
+                const genre = decodeURIComponent(path.split('/api/genre/')[1]);
+                return handleSearch(genre, `${request.url}&genre=${encodeURIComponent(genre)}`);
+            }
             if (path.startsWith('/api/info/')) return handleInfo(path.split('/api/info/')[1]);
             if (path.startsWith('/api/sources/')) return handleSources(path.split('/api/sources/')[1], request.url, request);
             if (path === '/api/stream') return handleStream(request.url, request);

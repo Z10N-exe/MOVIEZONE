@@ -39,6 +39,17 @@ export const fetchHomepage = async () => {
     }
 };
 
+export const fetchGenre = async (genre) => {
+    try {
+        const response = await fetch(`${API_URL}/genre/${encodeURIComponent(genre)}`);
+        const json = await response.json();
+        return json.data?.items || [];
+    } catch (e) {
+        console.error(e);
+        return [];
+    }
+};
+
 export const fetchSources = async (movieId, season = 0, episode = 0) => {
     try {
         const url = new URL(`${API_URL}/sources/${movieId}`);
