@@ -688,7 +688,7 @@ app.get('/api/sources/:movieId', async (req, res) => {
     }
 });
 
-// Stream endpoint — uses cached downloads from /api/sources, redirects browser to CDN URL
+// Stream endpoint — proxies video using okhttp UA (CDN requires mobile app UA, blocks browsers)
 app.get('/api/stream/:movieId', async (req, res) => {
     try {
         const { movieId } = req.params;
@@ -696,12 +696,9 @@ app.get('/api/stream/:movieId', async (req, res) => {
         const episode = parseInt(req.query.episode) || 0;
         const qualityPref = parseInt(req.query.quality) || 480;
 
-        // Use cached downloads — avoids second API call that gets rate-limited
         const cacheKey = `dl_${movieId}_${season}_${episode}`;
         let downloads = apiCache.get(cacheKey);
-
         if (!downloads) {
-            // Cache miss — fetch fresh
             const result = await getDownloads(movieId, season, episode);
             downloads = result.downloads;
             if (downloads.length) apiCache.set(cacheKey, downloads, 600);
@@ -716,12 +713,36 @@ app.get('/api/stream/:movieId', async (req, res) => {
             );
         }
 
-        console.log(`Redirecting to ${source.resolution}p`);
-        // 302 redirect — browser fetches CDN URL directly with its own IP
-        res.redirect(302, source.url);
+        console.log(`Streaming ${movieId} @ ${source.resolution}p`);
+
+        const range = req.headers.range;
+        const headers = {
+            'User-Agent': 'okhttp/4.12.0',
+            'Referer': 'https://fmoviesunblocked.net/',
+            'Origin': 'https://fmoviesunblocked.net',
+        };
+        if (range) headers['Range'] = range;
+
+        const upstream = await axiosInstance({
+            method: 'GET',
+            url: source.url,
+            responseType: 'stream',
+            headers,
+            timeout: 0,
+            maxRedirects: 5,
+        });
+
+        ['content-type', 'content-length', 'content-range', 'accept-ranges'].forEach(h => {
+            if (upstream.headers[h]) res.setHeader(h, upstream.headers[h]);
+        });
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.status(upstream.status);
+        upstream.data.pipe(res);
+        upstream.data.on('error', () => { if (!res.headersSent) res.status(500).end(); });
 
     } catch (error) {
-        console.error('Stream error:', error.message);
+        console.error('Stream error:', error.response?.status, error.message);
         if (!res.headersSent) res.status(500).json({ status: 'error', message: error.message });
     }
 });

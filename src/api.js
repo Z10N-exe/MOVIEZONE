@@ -1,6 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'https://moviezone-api.onrender.com/api');
-// Worker URL handles streaming and downloads (no IP restrictions, no timeouts)
-const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'https://moviezone-api.onrender.com/api';
+const API_URL = import.meta.env.VITE_API_URL || 'https://moviezone-api.onrender.com/api';
 
 export const getImageUrl = (path, size = 'w342') => {
     if (!path) return '';
