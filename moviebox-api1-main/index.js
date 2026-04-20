@@ -664,6 +664,10 @@ app.get('/api/sources/:movieId', async (req, res) => {
             return res.json({ status: 'success', data: { downloads: [], processedSources: [] } });
         }
 
+        // Cache downloads so /api/stream can reuse without a second API call
+        const cacheKey = `dl_${movieId}_${season}_${episode}`;
+        apiCache.set(cacheKey, downloads, 600); // 10 min
+
         const protocol = req.get('x-forwarded-proto') || req.protocol;
         const baseUrl = `${protocol}://${req.get('host')}`;
 
@@ -684,8 +688,7 @@ app.get('/api/sources/:movieId', async (req, res) => {
     }
 });
 
-// Stream endpoint — returns 302 redirect to the signed CDN URL
-// Browser plays it directly with its own IP and user agent
+// Stream endpoint — uses cached downloads from /api/sources, redirects browser to CDN URL
 app.get('/api/stream/:movieId', async (req, res) => {
     try {
         const { movieId } = req.params;
@@ -693,7 +696,17 @@ app.get('/api/stream/:movieId', async (req, res) => {
         const episode = parseInt(req.query.episode) || 0;
         const qualityPref = parseInt(req.query.quality) || 480;
 
-        const { downloads } = await getDownloads(movieId, season, episode);
+        // Use cached downloads — avoids second API call that gets rate-limited
+        const cacheKey = `dl_${movieId}_${season}_${episode}`;
+        let downloads = apiCache.get(cacheKey);
+
+        if (!downloads) {
+            // Cache miss — fetch fresh
+            const result = await getDownloads(movieId, season, episode);
+            downloads = result.downloads;
+            if (downloads.length) apiCache.set(cacheKey, downloads, 600);
+        }
+
         if (!downloads.length) return res.status(404).json({ status: 'error', message: 'No sources found' });
 
         let source = downloads.find(d => Number(d.resolution) === qualityPref);
@@ -703,9 +716,8 @@ app.get('/api/stream/:movieId', async (req, res) => {
             );
         }
 
-        console.log(`Redirecting to ${source.resolution}p CDN URL`);
-
-        // 302 redirect — browser plays the CDN URL directly
+        console.log(`Redirecting to ${source.resolution}p`);
+        // 302 redirect — browser fetches CDN URL directly with its own IP
         res.redirect(302, source.url);
 
     } catch (error) {
@@ -724,7 +736,7 @@ function sanitizeFilename(filename) {
         .trim();
 }
 
-// Download proxy endpoint - adds proper headers to bypass CDN restrictions
+// Download endpoint — redirects to CDN URL with proper filename via Content-Disposition
 app.get('/api/download', async (req, res) => {
     try {
         const downloadUrl = req.query.url;
@@ -732,71 +744,25 @@ app.get('/api/download', async (req, res) => {
         const season = req.query.season;
         const episode = req.query.episode;
         const quality = req.query.quality || '';
-        
+
         if (!downloadUrl || !downloadUrl.startsWith('http')) {
             return res.status(400).json({ status: 'error', message: 'Invalid download URL' });
         }
-        
-        // Build filename from metadata
+
         let filename = sanitizeFilename(title);
-        
-        // Add season and episode if available (TV shows)
-        if (season && episode) {
-            filename += `_S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-        }
-        
-        // Add quality if available
-        if (quality) {
-            filename += `_${quality}`;
-        }
-        
-        // Add file extension
+        if (season && episode) filename += `_S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`;
+        if (quality) filename += `_${quality}p`;
         filename += '.mp4';
-        
-        console.log(`Proxying download: ${downloadUrl}`);
-        console.log(`Filename: ${filename}`);
-        
-        // Make request with proper headers that allow CDN access
-        // No timeout for large file downloads
-        const response = await axios({
-            method: 'GET',
-            url: downloadUrl,
-            responseType: 'stream',
-            timeout: 0, // Disable timeout for large files
-            maxContentLength: Infinity,
-            maxBodyLength: Infinity,
-            headers: {
-                'User-Agent': 'okhttp/4.12.0',
-                'Referer': 'https://fmoviesunblocked.net/',
-                'Origin': 'https://fmoviesunblocked.net'
-            }
-        });
-        
-        // Forward the content-type and other relevant headers with custom filename
-        res.set({
-            'Content-Type': response.headers['content-type'],
-            'Content-Length': response.headers['content-length'],
-            'Content-Disposition': `attachment; filename="${filename}"`
-        });
-        
-        // Pipe the video stream to the response with error handling
-        response.data.on('error', (error) => {
-            console.error('Download stream error:', error.message);
-            if (!res.headersSent) {
-                res.status(500).json({
-                    status: 'error',
-                    message: 'Download stream failed',
-                    error: error.message
-                });
-            }
-        });
-        
-        res.on('close', () => {
-            console.log('Client closed connection');
-            response.data.destroy();
-        });
-        
-        response.data.pipe(res);
+
+        // Redirect browser directly to CDN — avoids Render IP getting blocked
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.redirect(302, downloadUrl);
+
+    } catch (error) {
+        console.error('Download error:', error.message);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
         
     } catch (error) {
         console.error('Download proxy error:', error.message);

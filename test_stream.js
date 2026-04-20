@@ -122,11 +122,17 @@ async function run() {
     t6 ? passed++ : failed++;
 
     // 7. Follow redirect and get video bytes
-    const t7 = await test(`Stream bytes (range 0-1023)`, async () => {
+    const t7 = await test(`Stream bytes (follow redirect, range 0-1023)`, async () => {
       if (!streamUrl) throw new Error('No streamUrl');
-      const r = await fetch(streamUrl, { headers: { 'Range': 'bytes=0-1023', 'User-Agent': 'okhttp/4.12.0' } });
-      if (![200, 206].includes(r.status)) throw new Error(`HTTP ${r.status}`);
-      return `${r.status} — ${r.headers.get('content-type')}`;
+      // First get the redirect location
+      const r1 = await fetch(streamUrl, { method: 'HEAD' });
+      const location = r1.headers.get('location');
+      if (!location && r1.status !== 200) throw new Error(`No redirect, HTTP ${r1.status}`);
+      const targetUrl = location || streamUrl;
+      // Now fetch bytes from the CDN URL directly
+      const r2 = await fetch(targetUrl, { headers: { 'Range': 'bytes=0-1023', 'User-Agent': 'okhttp/4.12.0', 'Referer': 'https://fmoviesunblocked.net/' } });
+      if (![200, 206].includes(r2.status)) throw new Error(`CDN HTTP ${r2.status}`);
+      return `${r2.status} — ${r2.headers.get('content-type')} (redirected to CDN ✓)`;
     });
     t7 ? passed++ : failed++;
 
