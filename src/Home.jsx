@@ -93,7 +93,11 @@ export default function Home() {
     else { addToMyList({ id: featured.id, title: featured.title, imgUrl: getImageUrl(featured.thumbnail) }); setListAdded(true); }
   };
 
-  const goToMovie = (movie) => navigate(`/movie/${movie.id}`);
+const goToMovie = (movie) => {
+    // Series go to details page to pick episode, movies go straight to player
+    if (movie.subjectType === 2) navigate(`/movie/${movie.id}`);
+    else navigate(`/movie/${movie.id}`);
+  };
   const tvShows = useMemo(() => trending.filter(m => m.subjectType === 2), [trending]);
   const films = useMemo(() => trending.filter(m => m.subjectType === 1), [trending]);
   const newReleases = useMemo(() => [...trending].sort((a, b) => new Date(b.releaseDate || 0) - new Date(a.releaseDate || 0)).slice(0, 15), [trending]);
@@ -131,7 +135,7 @@ export default function Home() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button onClick={() => navigate(`/player/${featured.id}`)}
               style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#fff', color: '#000', border: 'none', padding: '9px 22px', borderRadius: 5, fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
-              <Play size={18} fill="black" /> Play
+              <Play size={18} fill="black" /> {featured.subjectType === 2 ? 'Watch' : 'Play'}
             </button>
             <button onClick={() => navigate(`/movie/${featured.id}`)}
               style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(109,109,110,0.7)', color: '#fff', border: 'none', padding: '9px 18px', borderRadius: 5, fontWeight: 600, fontSize: 14, cursor: 'pointer', backdropFilter: 'blur(4px)' }}>

@@ -65,9 +65,14 @@ export default function Player() {
           else { setError('Title not found.'); setLoading(false); return; }
         }
 
-        // Fetch sources — browser plays directUrl directly (CDN allows browser IPs)
+        // Fetch sources — validate they exist
         const sourcesRes = await fetchSources(targetId, effectiveSeason, effectiveEpisode);
         if (!sourcesRes?.length) {
+          // If no season/episode provided, this might be a series — redirect to details
+          if (effectiveSeason === 0 && effectiveEpisode === 0) {
+            navigate(`/movie/${targetId}`, { replace: true });
+            return;
+          }
           setError('No stream sources available for this title.');
           setLoading(false);
           return;
