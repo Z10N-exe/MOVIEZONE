@@ -75,7 +75,7 @@ export default function Player() {
 
         const builtSources = sourcesRes.map(s => ({
           quality: Number(s.quality) || s.quality,
-          streamUrl: s.streamUrl, // proxied through /api/stream/:movieId
+          streamUrl: s.streamUrl,
           downloadUrl: s.downloadUrl,
         }));
         setSources(builtSources);

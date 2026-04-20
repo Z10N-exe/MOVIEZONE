@@ -1,4 +1,6 @@
 const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? '/api' : 'https://moviezone-api.onrender.com/api');
+// Worker URL handles streaming and downloads (no IP restrictions, no timeouts)
+const WORKER_URL = import.meta.env.VITE_WORKER_URL || 'https://moviezone-api.onrender.com/api';
 
 export const getImageUrl = (path, size = 'w342') => {
     if (!path) return '';
@@ -47,7 +49,18 @@ export const fetchSources = async (movieId, season = 0, episode = 0) => {
 
         const response = await fetch(url);
         const json = await response.json();
-        return json.data?.processedSources || [];
+        const sources = json.data?.processedSources || [];
+
+        // Rewrite streamUrl and downloadUrl to use the worker (handles CDN without IP issues)
+        return sources.map(s => ({
+            ...s,
+            streamUrl: s.streamUrl
+                ? `${WORKER_URL}/stream?url=${encodeURIComponent(s.directUrl)}`
+                : s.streamUrl,
+            downloadUrl: s.downloadUrl
+                ? `${WORKER_URL}/download?url=${encodeURIComponent(s.directUrl)}&title=${encodeURIComponent(s.title || 'video')}&quality=${s.quality}`
+                : s.downloadUrl,
+        }));
     } catch (e) {
         console.error(e);
         return [];
