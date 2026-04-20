@@ -147,19 +147,20 @@ const MovieDetails = () => {
             <button 
               onClick={() => {
                 if (sources.length > 0) {
+                  const isSeries = movie.subjectType === 2 || seasonsData.length > 0;
+                  // Pick best quality available (highest resolution)
+                  const best = sources.reduce((a, b) => (Number(b.quality) > Number(a.quality) ? b : a), sources[0]);
                   addDownload({ 
                     id: targetId, 
                     title: movie.title || movie.name, 
                     imgUrl: getImageUrl(movie.poster_path || movie.thumbnail),
-                    duration: movie.duration || '',
-                    size: sources[0].size || '',
-                    season: (movie.subjectType === 2 || seasonsData.length > 0) ? selectedSeason : null,
-                    episode: (movie.subjectType === 2 || seasonsData.length > 0) ? selectedEpisode : null
+                    size: best.size || '',
+                    season: isSeries ? selectedSeason : null,
+                    episode: isSeries ? selectedEpisode : null
                   });
-                  // Create a hidden anchor and click it for proper download
                   const a = document.createElement('a');
-                  a.href = sources[0].downloadUrl;
-                  a.download = `${movie.title || 'video'}.mp4`;
+                  a.href = best.downloadUrl;
+                  a.download = '';
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);

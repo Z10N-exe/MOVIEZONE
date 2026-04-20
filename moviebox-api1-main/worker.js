@@ -186,7 +186,7 @@ async function handleSources(movieId, url, request) {
         quality: Number(f.resolution) || f.resolution,
         directUrl: f.url,
         streamUrl: `${base}/api/stream?url=${encodeURIComponent(f.url)}`,
-        downloadUrl: `${base}/api/download?url=${encodeURIComponent(f.url)}&title=${encodeURIComponent(title)}&quality=${f.resolution}`,
+        downloadUrl: `${base}/api/download?url=${encodeURIComponent(f.url)}&title=${encodeURIComponent(title)}&quality=${f.resolution}${season > 0 ? `&season=${season}&episode=${episode}` : ''}`,
         size: f.size,
         format: 'mp4',
     }));
