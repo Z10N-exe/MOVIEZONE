@@ -763,16 +763,6 @@ app.get('/api/download', async (req, res) => {
         res.status(500).json({ status: 'error', message: error.message });
     }
 });
-        
-    } catch (error) {
-        console.error('Download proxy error:', error.message);
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to proxy download',
-            error: error.message
-        });
-    }
-});
 
 
 // --- MIDDLEWARE ---
