@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, Play, Pause, Maximize, Settings, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { fetchSources, fetchAds, fetchSearch } from './api';
+import { fetchSources, fetchAds, fetchSearch, fetchInfo } from './api';
 import { useAppContext } from './AppContext';
 
 const loadHls = () => new Promise((resolve) => {
@@ -68,8 +68,10 @@ export default function Player() {
         // Fetch sources — validate they exist
         const sourcesRes = await fetchSources(targetId, effectiveSeason, effectiveEpisode);
         if (!sourcesRes?.length) {
-          // If no season/episode provided, this might be a series — redirect to details
-          if (effectiveSeason === 0 && effectiveEpisode === 0) {
+          // No sources — check if it's a series that needs episode selection
+          const info = await fetchInfo(targetId);
+          const isSeries = info?.subject?.subjectType === 2 || info?.resource?.seasons?.length > 0;
+          if (isSeries || (effectiveSeason === 0 && effectiveEpisode === 0)) {
             navigate(`/movie/${targetId}`, { replace: true });
             return;
           }
