@@ -75,7 +75,8 @@ export default function Player() {
 
         const builtSources = sourcesRes.map(s => ({
           quality: Number(s.quality) || s.quality,
-          streamUrl: s.streamUrl,
+          streamUrl: s.streamUrl,   // /api/stream/:id → 302 → CDN URL
+          directUrl: s.directUrl,   // raw CDN URL fallback
           downloadUrl: s.downloadUrl,
         }));
         setSources(builtSources);

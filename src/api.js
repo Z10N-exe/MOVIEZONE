@@ -49,18 +49,7 @@ export const fetchSources = async (movieId, season = 0, episode = 0) => {
 
         const response = await fetch(url);
         const json = await response.json();
-        const sources = json.data?.processedSources || [];
-
-        // Rewrite streamUrl and downloadUrl to use the worker (handles CDN without IP issues)
-        return sources.map(s => ({
-            ...s,
-            streamUrl: s.streamUrl
-                ? `${WORKER_URL}/stream?url=${encodeURIComponent(s.directUrl)}`
-                : s.streamUrl,
-            downloadUrl: s.downloadUrl
-                ? `${WORKER_URL}/download?url=${encodeURIComponent(s.directUrl)}&title=${encodeURIComponent(s.title || 'video')}&quality=${s.quality}`
-                : s.downloadUrl,
-        }));
+        return json.data?.processedSources || [];
     } catch (e) {
         console.error(e);
         return [];
