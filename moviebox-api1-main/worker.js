@@ -100,7 +100,17 @@ async function apiRequest(url, options = {}) {
 }
 
 function processResponse(data) {
-    return data?.data || data;
+    const d = data?.data || data;
+    // Normalize subjectList → items
+    if (d?.subjectList && !d.items) d.items = d.subjectList;
+    if (d?.items) {
+        d.items = d.items.map(i => ({
+            ...i,
+            id: i.subjectId || i.id,
+            thumbnail: i.thumbnail || i.cover?.url || i.stills?.url || '',
+        }));
+    }
+    return d;
 }
 
 // ─── ROUTE HANDLERS ──────────────────────────────────────────────────────────

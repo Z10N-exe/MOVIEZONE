@@ -5,9 +5,6 @@ compatibility_date = "2024-01-01"
 [observability]
 enabled = true
 
-# KV namespace for users, ads, settings, content
-# Create with: wrangler kv:namespace create MOVIEZONE_KV
-# Then replace the id below with the output id
 [[kv_namespaces]]
 binding = "MOVIEZONE_KV"
-id = "REPLACE_WITH_YOUR_KV_ID"
+id = "f71c0520a2b146f88679695f82e2ba43"

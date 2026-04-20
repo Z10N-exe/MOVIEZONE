@@ -30,4 +30,4 @@ services:
 
     envVars:
       - key: VITE_API_URL
-        value: https://moviezone-api.onrender.com/api
+        value: https://moviezone-api.nwebeduzion.workers.dev/api

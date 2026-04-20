@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || 'https://moviezone-api.onrender.com/api';
+const API_URL = import.meta.env.VITE_API_URL || 'https://moviezone-api.nwebeduzion.workers.dev/api';
 
 export const getImageUrl = (path, size = 'w342') => {
     if (!path) return '';

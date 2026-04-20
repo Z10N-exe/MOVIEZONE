@@ -2,10 +2,10 @@
 // Run: node test_stream.js
 // Tests the full pipeline: sources -> stream -> download
 
-const API = process.env.TEST_API || 'http://localhost:5000/api';
+const API = process.env.TEST_API || 'https://moviezone-api.nwebeduzion.workers.dev/api';
 const TEST_MOVIE = '8906247916759695608'; // Avatar
 const TEST_SERIES = '9028867555875774472'; // Wednesday
-const TIMEOUT = 30000;
+const TIMEOUT = 60000;
 
 import https from 'https';
 import http from 'http';
@@ -23,6 +23,20 @@ function fetch(url, options = {}) {
       timeout: 30000,
     };
     const req = lib.request(reqOptions, (res) => {
+      // For streaming responses, resolve immediately with headers without reading body
+      const isStream = (res.headers['content-type'] || '').includes('video') ||
+                       res.statusCode === 206;
+      if (isStream && options.streamCheck) {
+        res.destroy(); // don't read the body
+        resolve({
+          ok: res.statusCode >= 200 && res.statusCode < 300,
+          status: res.statusCode,
+          headers: { get: (h) => res.headers[h.toLowerCase()] },
+          json: () => Promise.reject(new Error('stream')),
+          arrayBuffer: () => Promise.resolve(Buffer.alloc(0)),
+        });
+        return;
+      }
       const chunks = [];
       res.on('data', c => chunks.push(c));
       res.on('end', () => {
@@ -32,7 +46,7 @@ function fetch(url, options = {}) {
           status: res.statusCode,
           headers: { get: (h) => res.headers[h.toLowerCase()] },
           json: () => JSON.parse(body.toString()),
-          arrayBuffer: () => body.buffer,
+          arrayBuffer: () => body,
         });
       });
     });
@@ -115,7 +129,7 @@ async function run() {
     const streamUrl = movieSources[0].streamUrl;
     const t6 = await test(`Stream URL (${movieSources[0].quality}p) — bytes 0-1023`, async () => {
       if (!streamUrl) throw new Error('No streamUrl');
-      const r = await fetch(streamUrl, { headers: { 'Range': 'bytes=0-1023' } });
+      const r = await fetch(streamUrl, { headers: { 'Range': 'bytes=0-1023' }, streamCheck: true });
       if (![200, 206].includes(r.status)) throw new Error(`HTTP ${r.status}`);
       return `HTTP ${r.status} ${r.headers.get('content-type')}`;
     });
