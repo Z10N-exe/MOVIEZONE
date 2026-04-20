@@ -141,8 +141,10 @@ async function run() {
     const t8 = await test(`Download URL reachable`, async () => {
       if (!downloadUrl) throw new Error('No downloadUrl');
       const r = await fetch(downloadUrl, { method: 'HEAD' });
-      if (!r.ok && r.status !== 206) throw new Error(`HTTP ${r.status}`);
-      return `${r.status}`;
+      // 302 redirect to CDN is the correct behavior
+      if (![200, 206, 301, 302].includes(r.status)) throw new Error(`HTTP ${r.status}`);
+      const loc = r.headers.get('location');
+      return `HTTP ${r.status}${loc ? ' → CDN redirect ✓' : ''}`;
     });
     t8 ? passed++ : failed++;
   }
