@@ -716,18 +716,21 @@ app.get('/api/stream/:movieId', async (req, res) => {
         console.log(`Streaming ${movieId} @ ${source.resolution}p`);
 
         const range = req.headers.range;
-        const headers = {
-            'User-Agent': 'okhttp/4.12.0',
+        const streamHeaders = {
+            ...DEFAULT_HEADERS,
+            'Host': new URL(source.url).hostname,
             'Referer': 'https://fmoviesunblocked.net/',
             'Origin': 'https://fmoviesunblocked.net',
         };
-        if (range) headers['Range'] = range;
+        if (range) streamHeaders['Range'] = range;
+        // Remove Host from DEFAULT_HEADERS override since CDN host differs
+        delete streamHeaders['Host'];
 
         const upstream = await axiosInstance({
             method: 'GET',
             url: source.url,
             responseType: 'stream',
-            headers,
+            headers: streamHeaders,
             timeout: 0,
             maxRedirects: 5,
         });
