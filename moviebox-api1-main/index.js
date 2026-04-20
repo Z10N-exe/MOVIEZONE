@@ -635,18 +635,38 @@ async function getDownloads(movieId, season, episode) {
     const detailPath = movieInfo?.subject?.detailPath;
     if (!detailPath) return { downloads: [], title: '', detailPath: '' };
 
-    const dlRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/download`, {
-        method: 'GET',
-        params: { subjectId: movieId, se: season, ep: episode },
-        headers: {
-            'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
-            'Origin': 'https://fmoviesunblocked.net',
-            'X-Forwarded-For': '1.1.1.1',
+    // Try multiple mirror hosts — different mirrors may return different CDN URLs
+    const mirrors = [SELECTED_HOST, 'moviebox.pk', 'moviebox.ph', 'h5.aoneroom.com'];
+    let downloads = [];
+
+    for (const mirror of mirrors) {
+        try {
+            const mirrorUrl = `https://${mirror}`;
+            const dlRes = await axiosInstance({
+                method: 'GET',
+                url: `${mirrorUrl}/wefeed-h5-bff/web/subject/download`,
+                params: { subjectId: movieId, se: season, ep: episode },
+                headers: {
+                    ...DEFAULT_HEADERS,
+                    'Host': mirror,
+                    'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
+                    'Origin': 'https://fmoviesunblocked.net',
+                    'X-Forwarded-For': '1.1.1.1',
+                }
+            });
+            const dlData = processApiResponse(dlRes);
+            if (dlData?.downloads?.length) {
+                downloads = dlData.downloads;
+                console.log(`Got downloads from mirror: ${mirror}`);
+                break;
+            }
+        } catch (e) {
+            console.log(`Mirror ${mirror} failed: ${e.message}`);
         }
-    });
-    const dlData = processApiResponse(dlRes);
+    }
+
     return {
-        downloads: dlData?.downloads || [],
+        downloads,
         title: movieInfo?.subject?.title || 'video',
         detailPath,
     };
@@ -691,13 +711,22 @@ app.get('/api/sources/:movieId', async (req, res) => {
 // Debug endpoint — tests CDN access from this server
 app.get('/api/debug/cdn', async (req, res) => {
     const testUrl = req.query.url;
-    if (!testUrl) return res.json({ error: 'no url' });
-    try {
-        const r = await axiosInstance({ method: 'HEAD', url: testUrl, headers: { 'User-Agent': 'okhttp/4.12.0', 'Referer': 'https://fmoviesunblocked.net/' }, timeout: 10000 });
-        res.json({ status: r.status, headers: r.headers });
-    } catch (e) {
-        res.json({ error: e.message, status: e.response?.status, responseHeaders: e.response?.headers });
+    if (!testUrl) return res.json({ error: 'no url param' });
+    const results = {};
+    const uas = {
+        'okhttp': 'okhttp/4.12.0',
+        'chrome': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'curl': 'curl/7.68.0',
+    };
+    for (const [name, ua] of Object.entries(uas)) {
+        try {
+            const r = await axiosInstance({ method: 'HEAD', url: testUrl, headers: { 'User-Agent': ua, 'Referer': 'https://fmoviesunblocked.net/' }, timeout: 8000 });
+            results[name] = { status: r.status, contentType: r.headers['content-type'], size: r.headers['content-length'] };
+        } catch (e) {
+            results[name] = { status: e.response?.status || 'ERR', error: e.message };
+        }
     }
+    res.json({ url: testUrl.substring(0, 80), results });
 });
 
 // Stream endpoint — proxies video using okhttp UA (CDN requires mobile app UA, blocks browsers)
@@ -796,6 +825,7 @@ app.get('/api/download', async (req, res) => {
 
         console.log(`Downloading: ${filename}`);
 
+        const range = req.headers.range;
         const upstream = await axiosInstance({
             method: 'GET',
             url: downloadUrl,
@@ -807,14 +837,17 @@ app.get('/api/download', async (req, res) => {
                 'User-Agent': 'okhttp/4.12.0',
                 'Referer': 'https://fmoviesunblocked.net/',
                 'Origin': 'https://fmoviesunblocked.net',
+                ...(range ? { 'Range': range } : {}),
             }
         });
 
         res.setHeader('Content-Type', upstream.headers['content-type'] || 'video/mp4');
-        res.setHeader('Content-Length', upstream.headers['content-length'] || '');
+        if (upstream.headers['content-length']) res.setHeader('Content-Length', upstream.headers['content-length']);
+        if (upstream.headers['content-range']) res.setHeader('Content-Range', upstream.headers['content-range']);
+        res.setHeader('Accept-Ranges', 'bytes');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.status(200);
+        res.status(range ? 206 : 200);
         upstream.data.pipe(res);
         upstream.data.on('error', () => { if (!res.headersSent) res.status(500).end(); });
         res.on('close', () => upstream.data.destroy());
