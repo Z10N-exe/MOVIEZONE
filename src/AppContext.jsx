@@ -20,6 +20,7 @@ export const AppProvider = ({ children }) => {
         setUser(userData);
     };
 
+    const isPremium = user?.isPremium || false;
     const logout = () => {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
@@ -55,7 +56,7 @@ export const AppProvider = ({ children }) => {
     };
 
     return (
-        <AppContext.Provider value={{ user, setUser, favorites, setFavorites, login, logout, myList, addToMyList, removeFromMyList, isInMyList, downloads, addDownload }}>
+        <AppContext.Provider value={{ user, setUser, favorites, setFavorites, login, logout, myList, addToMyList, removeFromMyList, isInMyList, downloads, addDownload, isPremium }}>
             {children}
         </AppContext.Provider>
     );

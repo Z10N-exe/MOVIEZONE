@@ -8,7 +8,8 @@ const connectDB = async () => {
         console.log('MongoDB connected');
     } catch (err) {
         console.error('MongoDB connection error:', err.message);
-        process.exit(1);
+        console.warn('Server starting without MongoDB — auth/admin features disabled');
+        // Don't exit — movie browsing still works without DB
     }
 };
 

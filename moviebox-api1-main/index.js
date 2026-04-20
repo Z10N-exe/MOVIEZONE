@@ -864,98 +864,113 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
 
 // --- ADMIN ROUTES ---
 app.get('/api/admin/stats', authenticateToken, isAdmin, async (req, res) => {
-    const [totalUsers, premiumUsers, analytics, ads] = await Promise.all([
-        User.countDocuments(),
-        User.countDocuments({ isPremium: true }),
-        Analytics.findOne(),
-        Ad.find({ active: true }),
-    ]);
-    const recentSignups = await User.find().sort({ createdAt: -1 }).limit(5).select('-password');
-    res.json({
-        status: 'success',
-        data: {
-            totalUsers,
-            premiumUsers,
-            revenue: analytics?.revenue || 0,
-            activeAds: ads.length,
-            recentSignups,
-        }
-    });
+    try {
+        const [totalUsers, premiumUsers, analytics, ads] = await Promise.all([
+            User.countDocuments(),
+            User.countDocuments({ isPremium: true }),
+            Analytics.findOne(),
+            Ad.find({ active: true }),
+        ]);
+        const recentSignups = await User.find().sort({ createdAt: -1 }).limit(5).select('-password');
+        res.json({ status: 'success', data: { totalUsers, premiumUsers, revenue: analytics?.revenue || 0, activeAds: ads.length, recentSignups } });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.get('/api/admin/users', authenticateToken, isAdmin, async (req, res) => {
-    const users = await User.find().select('-password');
-    res.json({ status: 'success', data: users });
+    try {
+        const users = await User.find().select('-password');
+        res.json({ status: 'success', data: users });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.patch('/api/admin/users/:id', authenticateToken, isAdmin, async (req, res) => {
-    const { isPremium, role } = req.body;
-    const update = {};
-    if (isPremium !== undefined) update.isPremium = isPremium;
-    if (role !== undefined) update.role = role;
-    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
-    if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
-    res.json({ status: 'success', data: user });
+    try {
+        const { isPremium, role } = req.body;
+        const update = {};
+        if (isPremium !== undefined) update.isPremium = isPremium;
+        if (role !== undefined) update.role = role;
+        const user = await User.findByIdAndUpdate(req.params.id, update, { new: true }).select('-password');
+        if (!user) return res.status(404).json({ status: 'error', message: 'User not found' });
+        res.json({ status: 'success', data: user });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.post('/api/admin/ads', authenticateToken, isAdmin, async (req, res) => {
-    const ad = await Ad.create({ ...req.body, active: true });
-    res.json({ status: 'success', data: ad });
+    try {
+        const ad = await Ad.create({ ...req.body, active: true });
+        res.json({ status: 'success', data: ad });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.delete('/api/admin/ads/:id', authenticateToken, isAdmin, async (req, res) => {
-    await Ad.findByIdAndDelete(req.params.id);
-    res.json({ status: 'success', message: 'Ad deleted' });
+    try {
+        await Ad.findByIdAndDelete(req.params.id);
+        res.json({ status: 'success', message: 'Ad deleted' });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 // --- CONTENT MANAGEMENT ---
 app.get('/api/admin/content', authenticateToken, isAdmin, async (req, res) => {
-    let content = await Content.findOne();
-    if (!content) content = await Content.create({ featured: [] });
-    res.json({ status: 'success', data: content });
+    try {
+        let content = await Content.findOne();
+        if (!content) content = await Content.create({ featured: [] });
+        res.json({ status: 'success', data: content });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.post('/api/admin/content/featured', authenticateToken, isAdmin, async (req, res) => {
-    const movie = req.body;
-    let content = await Content.findOne();
-    if (!content) content = await Content.create({ featured: [] });
-    if (!content.featured.find(f => f.id === movie.id)) {
-        content.featured.push(movie);
-        await content.save();
-    }
-    res.json({ status: 'success', data: movie });
+    try {
+        const movie = req.body;
+        let content = await Content.findOne();
+        if (!content) content = await Content.create({ featured: [] });
+        if (!content.featured.find(f => f.id === movie.id)) {
+            content.featured.push(movie);
+            await content.save();
+        }
+        res.json({ status: 'success', data: movie });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.delete('/api/admin/content/featured/:id', authenticateToken, isAdmin, async (req, res) => {
-    const content = await Content.findOne();
-    if (content) {
-        content.featured = content.featured.filter(f => f.id !== req.params.id);
-        await content.save();
-    }
-    res.json({ status: 'success', message: 'Removed from featured' });
+    try {
+        const content = await Content.findOne();
+        if (content) {
+            content.featured = content.featured.filter(f => f.id !== req.params.id);
+            await content.save();
+        }
+        res.json({ status: 'success', message: 'Removed from featured' });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 // --- SETTINGS ---
 app.get('/api/admin/settings', authenticateToken, isAdmin, async (req, res) => {
-    let settings = await Settings.findOne();
-    if (!settings) settings = await Settings.create({});
-    res.json({ status: 'success', data: settings });
+    try {
+        let settings = await Settings.findOne();
+        if (!settings) settings = await Settings.create({});
+        res.json({ status: 'success', data: settings });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 app.post('/api/admin/settings', authenticateToken, isAdmin, async (req, res) => {
-    const settings = await Settings.findOneAndUpdate({}, req.body, { upsert: true, new: true });
-    res.json({ status: 'success', data: settings });
+    try {
+        const settings = await Settings.findOneAndUpdate({}, req.body, { upsert: true, new: true });
+        res.json({ status: 'success', data: settings });
+    } catch (e) { res.status(500).json({ status: 'error', message: e.message }); }
 });
 
 // --- PUBLIC ADS ---
 app.get('/api/ads', async (req, res) => {
-    const ads = await Ad.find({ active: true });
-    res.json({ status: 'success', data: ads });
+    try {
+        const ads = await Ad.find({ active: true });
+        res.json({ status: 'success', data: ads });
+    } catch (e) { res.json({ status: 'success', data: [] }); }
 });
 
 app.get('/api/settings', async (req, res) => {
-    const settings = await Settings.findOne();
-    res.json({ status: 'success', data: { siteName: settings?.siteName || 'MovieZone', maintenanceMode: settings?.maintenanceMode || false } });
+    try {
+        const settings = await Settings.findOne();
+        res.json({ status: 'success', data: { siteName: settings?.siteName || 'MovieZone', maintenanceMode: settings?.maintenanceMode || false } });
+    } catch (e) { res.json({ status: 'success', data: { siteName: 'MovieZone', maintenanceMode: false } }); }
 });
 
 // Error handling middleware

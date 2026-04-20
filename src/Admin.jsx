@@ -45,6 +45,7 @@ const Admin = () => {
   const [content, setContent] = useState({ featured: [], categories: [] });
   const [settings, setSettings] = useState({ siteName: 'MovieZone', maintenanceMode: false, premiumPrice: 1000 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [newAd, setNewAd] = useState({ title: '', imageUrl: '', targetLink: '', displayTime: 0, type: 'banner', placement: 'homepage' });
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -60,20 +61,27 @@ const Admin = () => {
 
   const loadAllData = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const statsRes = await fetchAdminStats();
-      const usersRes = await fetchAdminUsers();
-      const adsRes = await fetchAds();
-      const contentRes = await fetchAdminContent();
-      const settingsRes = await fetchSettings();
-      
-      if (statsRes.status === 'success') setStats(statsRes.data);
-      if (usersRes.status === 'success') setUsers(usersRes.data);
-      if (adsRes.status === 'success') setAds(adsRes.data);
-      if (contentRes.status === 'success') setContent(contentRes.data);
-      if (settingsRes.status === 'success') setSettings(settingsRes.data);
+      const [statsRes, usersRes, adsRes, contentRes, settingsRes] = await Promise.allSettled([
+        fetchAdminStats(),
+        fetchAdminUsers(),
+        fetchAds(),
+        fetchAdminContent(),
+        fetchSettings(),
+      ]);
+
+      if (statsRes.status === 'fulfilled' && statsRes.value?.status === 'success') setStats(statsRes.value.data);
+      if (usersRes.status === 'fulfilled' && usersRes.value?.status === 'success') setUsers(usersRes.value.data);
+      if (adsRes.status === 'fulfilled' && adsRes.value?.status === 'success') setAds(adsRes.value.data);
+      if (contentRes.status === 'fulfilled' && contentRes.value?.status === 'success') setContent(contentRes.value.data);
+      if (settingsRes.status === 'fulfilled' && settingsRes.value?.status === 'success') setSettings(settingsRes.value.data);
+
+      // Check if all failed — likely DB not connected
+      const allFailed = [statsRes, usersRes].every(r => r.status === 'rejected' || r.value?.status === 'error');
+      if (allFailed) setLoadError('Could not connect to database. Make sure MONGO_URI is set on Render.');
     } catch (err) {
-      console.error(err);
+      setLoadError(err.message);
     } finally {
       setLoading(false);
     }
@@ -104,6 +112,12 @@ const Admin = () => {
 
   if (!user || user.role !== 'admin') return null;
   if (loading) return <div className="page-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading Admin...</div>;
+  if (loadError) return (
+    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 20, textAlign: 'center' }}>
+      <p style={{ color: '#ff4444', fontSize: 18 }}>⚠️ {loadError}</p>
+      <button onClick={loadAllData} style={{ padding: '10px 24px', borderRadius: 8, background: 'var(--primary-red)', border: 'none', color: '#fff', cursor: 'pointer' }}>Retry</button>
+    </div>
+  );
 
   return (
     <div className="admin-layout">
