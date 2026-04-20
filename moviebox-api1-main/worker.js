@@ -1,14 +1,6 @@
-// Cloudflare Worker for MovieBox API with full streaming support and resumable downloads
-
-const MIRROR_HOSTS = [
-    "h5.aoneroom.com",
-    "movieboxapp.in", 
-    "moviebox.pk",
-    "moviebox.ph",
-    "moviebox.id",
-    "v.moviebox.ph",
-    "netnaija.video"
-];
+// MovieZone Cloudflare Worker — Full API with streaming, auth, and admin
+// Deploy: wrangler deploy
+// KV namespace required: MOVIEZONE_KV (bind in wrangler.toml)
 
 const SELECTED_HOST = "h5.aoneroom.com";
 const HOST_URL = `https://${SELECTED_HOST}`;
@@ -26,780 +18,382 @@ const DEFAULT_HEADERS = {
     'X-Real-IP': '1.1.1.1'
 };
 
-const SubjectType = {
-    ALL: 0,
-    MOVIES: 1,
-    TV_SERIES: 2,
-    MUSIC: 6
-};
+const JWT_SECRET = 'moviezone_secret_cf_2024';
 
-let cookieCache = null;
-let cookieCacheTime = 0;
-const COOKIE_CACHE_DURATION = 3600000; // 1 hour
-
-function processApiResponse(data) {
-    if (data && data.data) {
-        return data.data;
-    }
-    return data;
-}
-
-async function getCookies() {
-    const now = Date.now();
-    if (cookieCache && (now - cookieCacheTime) < COOKIE_CACHE_DURATION) {
-        return cookieCache;
-    }
-
-    try {
-        const response = await fetch(`${HOST_URL}/wefeed-h5-bff/app/get-latest-app-pkgs?app_name=moviebox`, {
-            headers: DEFAULT_HEADERS
-        });
-
-        // Get all Set-Cookie headers properly
-        // Use getSetCookie() if available (newer Workers API) or manually parse
-        let setCookieHeaders = [];
-        if (typeof response.headers.getSetCookie === 'function') {
-            setCookieHeaders = response.headers.getSetCookie();
-        } else {
-            // Fallback: get all set-cookie headers manually
-            const allHeaders = [...response.headers];
-            setCookieHeaders = allHeaders
-                .filter(([key]) => key.toLowerCase() === 'set-cookie')
-                .map(([, value]) => value);
-        }
-        
-        if (setCookieHeaders.length > 0) {
-            // Extract just name=value from each Set-Cookie header
-            // Format: "name=value; Path=/; Max-Age=3600; HttpOnly"
-            // We need: "name=value"
-            const cookies = setCookieHeaders.map(cookie => {
-                const parts = cookie.split(';');
-                return parts[0].trim();
-            }).join('; ');
-            
-            cookieCache = cookies;
-            cookieCacheTime = now;
-        }
-        
-        return cookieCache;
-    } catch (error) {
-        console.error('Failed to get cookies:', error.message);
-        return null;
-    }
-}
-
-async function makeApiRequest(url, options = {}) {
-    const cookies = await getCookies();
-    
-    const headers = { ...DEFAULT_HEADERS, ...options.headers };
-    if (cookies) {
-        headers['Cookie'] = cookies;
-    }
-    
-    const response = await fetch(url, {
-        ...options,
-        headers
-    });
-    
-    return response;
-}
-
-function sanitizeFilename(filename) {
-    return filename
-        .replace(/[<>:"/\\|?*]/g, '')
-        .replace(/\s+/g, '_')
-        .replace(/_{2,}/g, '_')
-        .trim();
-}
-
-function corsHeaders() {
+// ─── CORS ────────────────────────────────────────────────────────────────────
+function cors(headers = {}) {
     return {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization'
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',
+        ...headers,
     };
 }
 
-async function handleHomepage() {
-    const response = await makeApiRequest(`${HOST_URL}/wefeed-h5-bff/web/home`);
-    const data = await response.json();
-    const content = processApiResponse(data);
-    
-    return new Response(JSON.stringify({
-        status: 'success',
-        data: content
-    }), {
-        headers: {
-            'Content-Type': 'application/json',
-            ...corsHeaders()
-        }
+function json(data, status = 200) {
+    return new Response(JSON.stringify(data), {
+        status,
+        headers: cors({ 'Content-Type': 'application/json' }),
     });
 }
 
-async function handleTrending(url) {
-    const urlObj = new URL(url);
-    const page = parseInt(urlObj.searchParams.get('page')) || 0;
-    const perPage = parseInt(urlObj.searchParams.get('perPage')) || 18;
-    
-    const params = new URLSearchParams({
-        page: page,
-        perPage: perPage,
-        uid: '5591179548772780352'
-    });
-    
-    const response = await makeApiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/trending?${params}`);
-    const data = await response.json();
-    const content = processApiResponse(data);
-    
-    return new Response(JSON.stringify({
-        status: 'success',
-        data: content
-    }), {
-        headers: {
-            'Content-Type': 'application/json',
-            ...corsHeaders()
+// ─── SIMPLE JWT (no external lib) ────────────────────────────────────────────
+function b64url(str) {
+    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+async function signJWT(payload) {
+    const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+    const body = b64url(JSON.stringify({ ...payload, exp: Math.floor(Date.now() / 1000) + 604800 }));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(JWT_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${header}.${body}`));
+    return `${header}.${body}.${b64url(String.fromCharCode(...new Uint8Array(sig)))}`;
+}
+
+async function verifyJWT(token) {
+    try {
+        const [header, body, sig] = token.split('.');
+        const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(JWT_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+        const valid = await crypto.subtle.verify('HMAC', key, Uint8Array.from(atob(sig.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0)), new TextEncoder().encode(`${header}.${body}`));
+        if (!valid) return null;
+        const payload = JSON.parse(atob(body.replace(/-/g, '+').replace(/_/g, '/')));
+        if (payload.exp < Math.floor(Date.now() / 1000)) return null;
+        return payload;
+    } catch { return null; }
+}
+
+async function hashPassword(password) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password + JWT_SECRET));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ─── KV HELPERS ──────────────────────────────────────────────────────────────
+async function kvGet(kv, key) {
+    try { return JSON.parse(await kv.get(key)); } catch { return null; }
+}
+async function kvSet(kv, key, value) {
+    await kv.put(key, JSON.stringify(value));
+}
+
+// ─── MOVIEBOX API ─────────────────────────────────────────────────────────────
+let cookieCache = null;
+let cookieCacheTime = 0;
+
+async function getCookies() {
+    if (cookieCache && Date.now() - cookieCacheTime < 3600000) return cookieCache;
+    try {
+        const r = await fetch(`${HOST_URL}/wefeed-h5-bff/app/get-latest-app-pkgs?app_name=moviebox`, { headers: DEFAULT_HEADERS });
+        const setCookies = r.headers.getSetCookie?.() || [];
+        if (setCookies.length) {
+            cookieCache = setCookies.map(c => c.split(';')[0].trim()).join('; ');
+            cookieCacheTime = Date.now();
         }
-    });
+    } catch {}
+    return cookieCache;
+}
+
+async function apiRequest(url, options = {}) {
+    const cookies = await getCookies();
+    const headers = { ...DEFAULT_HEADERS, ...options.headers };
+    if (cookies) headers['Cookie'] = cookies;
+    return fetch(url, { ...options, headers });
+}
+
+function processResponse(data) {
+    return data?.data || data;
+}
+
+// ─── ROUTE HANDLERS ──────────────────────────────────────────────────────────
+
+async function handleTrending(url) {
+    const u = new URL(url);
+    const params = new URLSearchParams({ page: u.searchParams.get('page') || 0, perPage: 18, uid: '5591179548772780352' });
+    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/trending?${params}`);
+    const data = processResponse(await r.json());
+    if (data.items) data.items = data.items.map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+    return json({ status: 'success', data });
 }
 
 async function handleSearch(query, url) {
-    const urlObj = new URL(url);
-    const page = parseInt(urlObj.searchParams.get('page')) || 1;
-    const perPage = parseInt(urlObj.searchParams.get('perPage')) || 24;
-    const subjectType = parseInt(urlObj.searchParams.get('type')) || SubjectType.ALL;
-    
-    const payload = {
-        keyword: query,
-        page,
-        perPage,
-        subjectType
-    };
-    
-    const response = await makeApiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
+    const u = new URL(url);
+    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(payload)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: query, page: 1, perPage: 24, subjectType: 0 }),
     });
-    
-    const data = await response.json();
-    let content = processApiResponse(data);
-    
-    if (subjectType !== SubjectType.ALL && content.items) {
-        content.items = content.items.filter(item => item.subjectType === subjectType);
-    }
-    
-    if (content.items) {
-        content.items.forEach(item => {
-            if (item.cover && item.cover.url) {
-                item.thumbnail = item.cover.url;
-            }
-            if (item.stills && item.stills.url && !item.thumbnail) {
-                item.thumbnail = item.stills.url;
-            }
-        });
-    }
-    
-    return new Response(JSON.stringify({
-        status: 'success',
-        data: content
-    }), {
-        headers: {
-            'Content-Type': 'application/json',
-            ...corsHeaders()
-        }
-    });
+    const data = processResponse(await r.json());
+    if (data.items) data.items = data.items.map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+    return json({ status: 'success', data });
 }
 
 async function handleInfo(movieId) {
-    const params = new URLSearchParams({ subjectId: movieId });
-    const response = await makeApiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?${params}`);
-    const data = await response.json();
-    const content = processApiResponse(data);
-    
-    if (content.subject) {
-        if (content.subject.cover && content.subject.cover.url) {
-            content.subject.thumbnail = content.subject.cover.url;
-        }
-        if (content.subject.stills && content.subject.stills.url && !content.subject.thumbnail) {
-            content.subject.thumbnail = content.subject.stills.url;
-        }
-    }
-    
-    return new Response(JSON.stringify({
-        status: 'success',
-        data: content
-    }), {
-        headers: {
-            'Content-Type': 'application/json',
-            ...corsHeaders()
-        }
-    });
+    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${movieId}`);
+    const data = processResponse(await r.json());
+    if (data.subject?.cover?.url) data.subject.thumbnail = data.subject.cover.url;
+    return json({ status: 'success', data });
+}
+
+async function handleHomepage() {
+    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/home`);
+    const data = processResponse(await r.json());
+    return json({ status: 'success', data });
 }
 
 async function handleSources(movieId, url, request) {
-    const urlObj = new URL(url);
-    const season = parseInt(urlObj.searchParams.get('season')) || 0;
-    const episode = parseInt(urlObj.searchParams.get('episode')) || 0;
-    
-    const infoParams = new URLSearchParams({ subjectId: movieId });
-    const infoResponse = await makeApiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?${infoParams}`);
-    const infoData = await infoResponse.json();
-    const movieInfo = processApiResponse(infoData);
-    
-    const detailPath = movieInfo?.subject?.detailPath;
-    if (!detailPath) {
-        return new Response(JSON.stringify({
-            status: 'error',
-            message: 'Could not get movie detail path'
-        }), {
-            status: 500,
-            headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders()
-            }
-        });
-    }
-    
-    const refererUrl = `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}?id=${movieId}&type=/movie/detail`;
-    
-    const params = new URLSearchParams({
-        subjectId: movieId,
-        se: season,
-        ep: episode
+    const u = new URL(url);
+    const season = u.searchParams.get('season') || 0;
+    const episode = u.searchParams.get('episode') || 0;
+
+    const infoR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${movieId}`);
+    const info = processResponse(await infoR.json());
+    const detailPath = info?.subject?.detailPath;
+    if (!detailPath) return json({ status: 'success', data: { downloads: [], processedSources: [] } });
+
+    const dlR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/download?subjectId=${movieId}&se=${season}&ep=${episode}`, {
+        headers: { 'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`, 'Origin': 'https://fmoviesunblocked.net' }
     });
-    
-    const response = await makeApiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/download?${params}`, {
-        headers: {
-            'Referer': refererUrl,
-            'Origin': 'https://fmoviesunblocked.net'
-        }
-    });
-    
-    const data = await response.json();
-    const content = processApiResponse(data);
-    
-    if (content && content.downloads) {
-        const title = movieInfo?.subject?.title || 'video';
-        const isEpisode = season > 0 && episode > 0;
-        
-        const protocol = request.headers.get('x-forwarded-proto') || 'https';
-        const host = request.headers.get('host');
-        const baseUrl = `${protocol}://${host}`;
-        
-        const sources = content.downloads.map(file => {
-            const downloadParams = new URLSearchParams({
-                url: file.url,
-                title: title,
-                quality: file.resolution || 'Unknown'
-            });
-            
-            if (isEpisode) {
-                downloadParams.append('season', season);
-                downloadParams.append('episode', episode);
-            }
-            
-            return {
-                id: file.id,
-                quality: file.resolution || 'Unknown',
-                directUrl: file.url,
-                downloadUrl: `${baseUrl}/api/download?${downloadParams.toString()}`,
-                streamUrl: `${baseUrl}/api/stream?url=${encodeURIComponent(file.url)}`,
-                size: file.size,
-                format: 'mp4'
-            };
-        });
-        
-        content.processedSources = sources;
-    }
-    
-    return new Response(JSON.stringify({
-        status: 'success',
-        data: content
-    }), {
-        headers: {
-            'Content-Type': 'application/json',
-            ...corsHeaders()
-        }
-    });
+    const dlData = processResponse(await dlR.json());
+    if (!dlData?.downloads?.length) return json({ status: 'success', data: { downloads: [], processedSources: [] } });
+
+    const title = info?.subject?.title || 'video';
+    const proto = request.headers.get('x-forwarded-proto') || 'https';
+    const host = request.headers.get('host');
+    const base = `${proto}://${host}`;
+
+    const processedSources = dlData.downloads.map(f => ({
+        id: f.id,
+        quality: Number(f.resolution) || f.resolution,
+        directUrl: f.url,
+        streamUrl: `${base}/api/stream?url=${encodeURIComponent(f.url)}`,
+        downloadUrl: `${base}/api/download?url=${encodeURIComponent(f.url)}&title=${encodeURIComponent(title)}&quality=${f.resolution}`,
+        size: f.size,
+        format: 'mp4',
+    }));
+
+    return json({ status: 'success', data: { ...dlData, processedSources } });
 }
 
 async function handleStream(url, request) {
-    const urlObj = new URL(url);
-    const streamUrl = urlObj.searchParams.get('url');
-    
-    if (!streamUrl || (!streamUrl.startsWith('https://bcdnw.hakunaymatata.com/') && !streamUrl.startsWith('https://valiw.hakunaymatata.com/'))) {
-        return new Response(JSON.stringify({
-            status: 'error',
-            message: 'Invalid stream URL'
-        }), {
-            status: 400,
-            headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders()
-            }
-        });
-    }
-    
+    const u = new URL(url);
+    const streamUrl = u.searchParams.get('url');
+    if (!streamUrl) return json({ status: 'error', message: 'No url param' }, 400);
+
     const range = request.headers.get('range');
-    
-    // Get file size with HEAD request
-    const headResponse = await fetch(streamUrl, {
-        method: 'HEAD',
-        headers: {
-            'User-Agent': 'okhttp/4.12.0',
-            'Referer': 'https://fmoviesunblocked.net/',
-            'Origin': 'https://fmoviesunblocked.net'
-        }
+    const headers = { 'User-Agent': 'okhttp/4.12.0', 'Referer': 'https://fmoviesunblocked.net/', 'Origin': 'https://fmoviesunblocked.net' };
+    if (range) headers['Range'] = range;
+
+    const upstream = await fetch(streamUrl, { headers });
+    const responseHeaders = cors({
+        'Content-Type': upstream.headers.get('content-type') || 'video/mp4',
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-cache',
     });
-    
-    const fileSize = parseInt(headResponse.headers.get('content-length'));
-    const contentType = headResponse.headers.get('content-type') || 'video/mp4';
-    
-    if (!fileSize || isNaN(fileSize)) {
-        return new Response(JSON.stringify({
-            status: 'error',
-            message: 'Could not determine file size'
-        }), {
-            status: 500,
-            headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders()
-            }
-        });
-    }
-    
-    if (range) {
-        const parts = range.replace(/bytes=/, '').split('-');
-        let start = parseInt(parts[0], 10);
-        let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-        
-        if (isNaN(start) && !isNaN(end)) {
-            start = fileSize - end;
-            end = fileSize - 1;
-        }
-        
-        if (isNaN(start) || isNaN(end) || start < 0 || end >= fileSize || start > end) {
-            return new Response(JSON.stringify({
-                status: 'error',
-                message: 'Range not satisfiable'
-            }), {
-                status: 416,
-                headers: {
-                    'Content-Range': `bytes */${fileSize}`,
-                    'Content-Type': 'application/json',
-                    ...corsHeaders()
-                }
-            });
-        }
-        
-        const chunkSize = (end - start) + 1;
-        
-        const response = await fetch(streamUrl, {
-            headers: {
-                'User-Agent': 'okhttp/4.12.0',
-                'Referer': 'https://fmoviesunblocked.net/',
-                'Origin': 'https://fmoviesunblocked.net',
-                'Range': `bytes=${start}-${end}`
-            }
-        });
-        
-        return new Response(response.body, {
-            status: 206,
-            headers: {
-                'Content-Type': contentType,
-                'Content-Length': chunkSize,
-                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-                'Accept-Ranges': 'bytes',
-                'Cache-Control': 'no-cache',
-                ...corsHeaders()
-            }
-        });
-        
-    } else {
-        const response = await fetch(streamUrl, {
-            headers: {
-                'User-Agent': 'okhttp/4.12.0',
-                'Referer': 'https://fmoviesunblocked.net/',
-                'Origin': 'https://fmoviesunblocked.net'
-            }
-        });
-        
-        return new Response(response.body, {
-            status: 200,
-            headers: {
-                'Content-Type': contentType,
-                'Content-Length': fileSize,
-                'Accept-Ranges': 'bytes',
-                'Cache-Control': 'no-cache',
-                ...corsHeaders()
-            }
-        });
-    }
+    if (upstream.headers.get('content-length')) responseHeaders['Content-Length'] = upstream.headers.get('content-length');
+    if (upstream.headers.get('content-range')) responseHeaders['Content-Range'] = upstream.headers.get('content-range');
+
+    return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
 async function handleDownload(url, request) {
-    const urlObj = new URL(url);
-    const downloadUrl = urlObj.searchParams.get('url');
-    const title = urlObj.searchParams.get('title') || 'video';
-    const season = urlObj.searchParams.get('season');
-    const episode = urlObj.searchParams.get('episode');
-    const quality = urlObj.searchParams.get('quality') || '';
-    
-    if (!downloadUrl || (!downloadUrl.startsWith('https://bcdnw.hakunaymatata.com/') && !downloadUrl.startsWith('https://valiw.hakunaymatata.com/'))) {
-        return new Response(JSON.stringify({
-            status: 'error',
-            message: 'Invalid download URL'
-        }), {
-            status: 400,
-            headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders()
-            }
-        });
-    }
-    
-    let filename = sanitizeFilename(title);
-    
-    if (season && episode) {
-        filename += `_S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`;
-    }
-    
-    if (quality) {
-        filename += `_${quality}`;
-    }
-    
+    const u = new URL(url);
+    const downloadUrl = u.searchParams.get('url');
+    const title = u.searchParams.get('title') || 'video';
+    const quality = u.searchParams.get('quality') || '';
+    const season = u.searchParams.get('season');
+    const episode = u.searchParams.get('episode');
+    if (!downloadUrl) return json({ status: 'error', message: 'No url param' }, 400);
+
+    let filename = title.replace(/[<>:"/\\|?*]/g, '').replace(/\s+/g, '_');
+    if (season && episode) filename += `_S${String(season).padStart(2,'0')}E${String(episode).padStart(2,'0')}`;
+    if (quality) filename += `_${quality}p`;
     filename += '.mp4';
-    
-    // Check if client sent a Range header for resumable downloads
+
     const range = request.headers.get('range');
-    
-    // Get file size first with HEAD request
-    const headResponse = await fetch(downloadUrl, {
-        method: 'HEAD',
-        headers: {
-            'User-Agent': 'okhttp/4.12.0',
-            'Referer': 'https://fmoviesunblocked.net/',
-            'Origin': 'https://fmoviesunblocked.net'
-        }
+    const headers = { 'User-Agent': 'okhttp/4.12.0', 'Referer': 'https://fmoviesunblocked.net/', 'Origin': 'https://fmoviesunblocked.net' };
+    if (range) headers['Range'] = range;
+
+    const upstream = await fetch(downloadUrl, { headers });
+    const responseHeaders = cors({
+        'Content-Type': upstream.headers.get('content-type') || 'video/mp4',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Accept-Ranges': 'bytes',
     });
-    
-    const fileSize = parseInt(headResponse.headers.get('content-length'));
-    const contentType = headResponse.headers.get('content-type') || 'video/mp4';
-    
-    if (!fileSize || isNaN(fileSize)) {
-        return new Response(JSON.stringify({
-            status: 'error',
-            message: 'Could not determine file size'
-        }), {
-            status: 500,
-            headers: {
-                'Content-Type': 'application/json',
-                ...corsHeaders()
-            }
-        });
-    }
-    
-    if (range) {
-        // Parse range header
-        const parts = range.replace(/bytes=/, '').split('-');
-        let start = parseInt(parts[0], 10);
-        let end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-        
-        // Handle suffix-byte-range
-        if (isNaN(start) && !isNaN(end)) {
-            start = fileSize - end;
-            end = fileSize - 1;
-        }
-        
-        // Validate range
-        if (isNaN(start) || isNaN(end) || start < 0 || end >= fileSize || start > end) {
-            return new Response(JSON.stringify({
-                status: 'error',
-                message: 'Range not satisfiable'
-            }), {
-                status: 416,
-                headers: {
-                    'Content-Range': `bytes */${fileSize}`,
-                    'Content-Type': 'application/json',
-                    ...corsHeaders()
-                }
-            });
-        }
-        
-        const chunkSize = (end - start) + 1;
-        
-        // Fetch with range
-        const response = await fetch(downloadUrl, {
-            headers: {
-                'User-Agent': 'okhttp/4.12.0',
-                'Referer': 'https://fmoviesunblocked.net/',
-                'Origin': 'https://fmoviesunblocked.net',
-                'Range': `bytes=${start}-${end}`
-            }
-        });
-        
-        return new Response(response.body, {
-            status: 206,
-            headers: {
-                'Content-Type': contentType,
-                'Content-Length': chunkSize,
-                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
-                'Content-Disposition': `attachment; filename="${filename}"`,
-                'Accept-Ranges': 'bytes',
-                ...corsHeaders()
-            }
-        });
-        
-    } else {
-        // No range, serve full file
-        const response = await fetch(downloadUrl, {
-            headers: {
-                'User-Agent': 'okhttp/4.12.0',
-                'Referer': 'https://fmoviesunblocked.net/',
-                'Origin': 'https://fmoviesunblocked.net'
-            }
-        });
-        
-        return new Response(response.body, {
-            headers: {
-                'Content-Type': contentType,
-                'Content-Length': fileSize,
-                'Content-Disposition': `attachment; filename="${filename}"`,
-                'Accept-Ranges': 'bytes',
-                ...corsHeaders()
-            }
-        });
-    }
+    if (upstream.headers.get('content-length')) responseHeaders['Content-Length'] = upstream.headers.get('content-length');
+    if (upstream.headers.get('content-range')) responseHeaders['Content-Range'] = upstream.headers.get('content-range');
+
+    return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
 }
 
-function getHomePage() {
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MovieBox API - Cloudflare Workers</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
-        .header {
-            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-            font-weight: 700;
-        }
-        .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
-        }
-        .badge {
-            display: inline-block;
-            background: #48bb78;
-            color: white;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            margin-top: 10px;
-        }
-        .content { padding: 30px; }
-        .feature-box {
-            background: #e6fffa;
-            border-radius: 10px;
-            padding: 20px;
-            margin: 20px 0;
-            border-left: 5px solid #48bb78;
-        }
-        .feature-box h3 {
-            color: #48bb78;
-            margin-bottom: 15px;
-        }
-        .feature-box ul {
-            list-style: none;
-            padding-left: 0;
-        }
-        .feature-box li {
-            padding: 5px 0;
-            color: #2d3748;
-        }
-        .feature-box li:before {
-            content: "✓ ";
-            color: #48bb78;
-            font-weight: bold;
-        }
-        .endpoint {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-            border-left: 5px solid #667eea;
-        }
-        .endpoint h3 {
-            color: #667eea;
-            margin-bottom: 10px;
-        }
-        .status {
-            display: inline-block;
-            background: #48bb78;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 3px;
-            font-size: 0.8em;
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🎬 MovieBox API</h1>
-            <p>Powered by Cloudflare Workers</p>
-            <span class="badge">✨ Streaming Optimized</span>
-            <span class="badge">⚡ Resumable Downloads</span>
-        </div>
-        
-        <div class="content">
-            <div class="feature-box">
-                <h3>🚀 Cloudflare Workers Features</h3>
-                <ul>
-                    <li>No timeout limits - stream files of any size</li>
-                    <li>Resumable downloads with HTTP range requests</li>
-                    <li>Global CDN distribution for fast access worldwide</li>
-                    <li>Efficient streaming without memory buffering</li>
-                    <li>Works great even on slow networks</li>
-                </ul>
-            </div>
-            
-            <div class="endpoint">
-                <h3>📥 API Endpoints</h3>
-                <p><strong>All endpoints fully operational with streaming support:</strong></p>
-                <ul style="list-style: none; padding-left: 0; margin-top: 10px;">
-                    <li>🔍 <code>GET /api/search/:query</code> - Search movies & TV series</li>
-                    <li>📋 <code>GET /api/info/:movieId</code> - Get detailed information</li>
-                    <li>📥 <code>GET /api/sources/:movieId</code> - Get download sources</li>
-                    <li>🏠 <code>GET /api/homepage</code> - Featured content</li>
-                    <li>🔥 <code>GET /api/trending</code> - Trending content</li>
-                    <li>📺 <code>GET /api/stream?url=...</code> - Video streaming (with seeking)</li>
-                    <li>⚡ <code>GET /api/download?url=...</code> - Download proxy (resumable)</li>
-                </ul>
-            </div>
-            
-            <div style="text-align: center; margin-top: 30px; padding: 20px; background: #f7fafc; border-radius: 10px;">
-                <h3 style="color: #2d3748; margin-bottom: 10px;">Ready for Cloudflare Deployment</h3>
-                <p style="color: #666;">Deploy with: <code>wrangler deploy</code></p>
-            </div>
-        </div>
-    </div>
-</body>
-</html>`;
-    
-    return new Response(html, {
-        headers: {
-            'Content-Type': 'text/html',
-            ...corsHeaders()
-        }
-    });
+// ─── AUTH HANDLERS ────────────────────────────────────────────────────────────
+
+async function handleSignup(request, kv) {
+    const { name, email, password } = await request.json();
+    if (!name || !email || !password) return json({ status: 'error', message: 'All fields required' }, 400);
+
+    const existing = await kvGet(kv, `user:${email.toLowerCase()}`);
+    if (existing) return json({ status: 'error', message: 'User already exists' }, 400);
+
+    const userCount = (await kvGet(kv, 'user:count')) || 0;
+    const id = crypto.randomUUID();
+    const user = { id, name, email: email.toLowerCase(), password: await hashPassword(password), role: userCount === 0 ? 'admin' : 'user', isPremium: false, createdAt: new Date().toISOString() };
+
+    await kvSet(kv, `user:${email.toLowerCase()}`, user);
+    await kvSet(kv, `userid:${id}`, email.toLowerCase());
+    await kvSet(kv, 'user:count', userCount + 1);
+
+    const token = await signJWT({ id, role: user.role });
+    return json({ status: 'success', token, user: { id, name, email: user.email, role: user.role, isPremium: false } });
 }
+
+async function handleLogin(request, kv) {
+    const { email, password } = await request.json();
+    if (!email || !password) return json({ status: 'error', message: 'Email and password required' }, 400);
+
+    const user = await kvGet(kv, `user:${email.toLowerCase()}`);
+    if (!user || user.password !== await hashPassword(password)) return json({ status: 'error', message: 'Invalid credentials' }, 401);
+
+    const token = await signJWT({ id: user.id, role: user.role });
+    return json({ status: 'success', token, user: { id: user.id, name: user.name, email: user.email, role: user.role, isPremium: user.isPremium } });
+}
+
+async function getAuthUser(request, kv) {
+    const auth = request.headers.get('Authorization');
+    if (!auth?.startsWith('Bearer ')) return null;
+    const payload = await verifyJWT(auth.slice(7));
+    if (!payload) return null;
+    const email = await kvGet(kv, `userid:${payload.id}`);
+    if (!email) return null;
+    return kvGet(kv, `user:${email}`);
+}
+
+// ─── ADMIN HANDLERS ───────────────────────────────────────────────────────────
+
+async function handleAdminStats(kv) {
+    const count = (await kvGet(kv, 'user:count')) || 0;
+    const ads = (await kvGet(kv, 'ads')) || [];
+    return json({ status: 'success', data: { totalUsers: count, premiumUsers: 0, revenue: 0, activeAds: ads.filter(a => a.active).length, recentSignups: [] } });
+}
+
+async function handleAdminUsers(kv) {
+    const count = (await kvGet(kv, 'user:count')) || 0;
+    // KV doesn't support listing easily — return count info
+    return json({ status: 'success', data: [], meta: { total: count } });
+}
+
+async function handleAdminAds(request, kv, method, adId) {
+    const ads = (await kvGet(kv, 'ads')) || [];
+    if (method === 'GET') return json({ status: 'success', data: ads });
+    if (method === 'POST') {
+        const body = await request.json();
+        const ad = { ...body, id: crypto.randomUUID(), active: true };
+        ads.push(ad);
+        await kvSet(kv, 'ads', ads);
+        return json({ status: 'success', data: ad });
+    }
+    if (method === 'DELETE' && adId) {
+        const updated = ads.filter(a => a.id !== adId);
+        await kvSet(kv, 'ads', updated);
+        return json({ status: 'success', message: 'Deleted' });
+    }
+    return json({ status: 'error', message: 'Not found' }, 404);
+}
+
+async function handleAdminContent(request, kv, method, action, itemId) {
+    const content = (await kvGet(kv, 'content')) || { featured: [] };
+    if (method === 'GET') return json({ status: 'success', data: content });
+    if (method === 'POST' && action === 'featured') {
+        const movie = await request.json();
+        if (!content.featured.find(f => f.id === movie.id)) content.featured.push(movie);
+        await kvSet(kv, 'content', content);
+        return json({ status: 'success', data: movie });
+    }
+    if (method === 'DELETE' && itemId) {
+        content.featured = content.featured.filter(f => f.id !== itemId);
+        await kvSet(kv, 'content', content);
+        return json({ status: 'success', message: 'Removed' });
+    }
+    return json({ status: 'error', message: 'Not found' }, 404);
+}
+
+async function handleAdminSettings(request, kv, method) {
+    const settings = (await kvGet(kv, 'settings')) || { siteName: 'MovieZone', maintenanceMode: false, premiumPrice: 1000 };
+    if (method === 'GET') return json({ status: 'success', data: settings });
+    if (method === 'POST') {
+        const body = await request.json();
+        const updated = { ...settings, ...body };
+        await kvSet(kv, 'settings', updated);
+        return json({ status: 'success', data: updated });
+    }
+    return json({ status: 'error', message: 'Not found' }, 404);
+}
+
+// ─── MAIN ROUTER ─────────────────────────────────────────────────────────────
 
 export default {
-    async fetch(request, env, ctx) {
+    async fetch(request, env) {
         const url = new URL(request.url);
-        
-        if (request.method === 'OPTIONS') {
-            return new Response(null, {
-                headers: corsHeaders()
-            });
-        }
-        
+        const path = url.pathname;
+        const method = request.method;
+        const kv = env.MOVIEZONE_KV;
+
+        if (method === 'OPTIONS') return new Response(null, { headers: cors() });
+
         try {
-            if (url.pathname === '/') {
-                return getHomePage();
+            // Public movie endpoints
+            if (path === '/api/trending') return handleTrending(request.url);
+            if (path === '/api/homepage') return handleHomepage();
+            if (path.startsWith('/api/search/')) return handleSearch(decodeURIComponent(path.split('/api/search/')[1]), request.url);
+            if (path.startsWith('/api/info/')) return handleInfo(path.split('/api/info/')[1]);
+            if (path.startsWith('/api/sources/')) return handleSources(path.split('/api/sources/')[1], request.url, request);
+            if (path === '/api/stream') return handleStream(request.url, request);
+            if (path === '/api/download') return handleDownload(request.url, request);
+
+            // Public ads & settings
+            if (path === '/api/ads') {
+                const ads = ((await kvGet(kv, 'ads')) || []).filter(a => a.active);
+                return json({ status: 'success', data: ads });
             }
-            
-            if (url.pathname === '/api/homepage') {
-                return await handleHomepage();
+            if (path === '/api/settings') {
+                const s = (await kvGet(kv, 'settings')) || { siteName: 'MovieZone', maintenanceMode: false };
+                return json({ status: 'success', data: { siteName: s.siteName, maintenanceMode: s.maintenanceMode } });
             }
-            
-            if (url.pathname === '/api/trending') {
-                return await handleTrending(request.url);
+
+            // Auth
+            if (path === '/api/auth/signup' && method === 'POST') return handleSignup(request, kv);
+            if (path === '/api/auth/login' && method === 'POST') return handleLogin(request, kv);
+            if (path === '/api/auth/me') {
+                const user = await getAuthUser(request, kv);
+                if (!user) return json({ status: 'error', message: 'Unauthorized' }, 401);
+                return json({ status: 'success', user: { id: user.id, name: user.name, email: user.email, role: user.role, isPremium: user.isPremium } });
             }
-            
-            if (url.pathname.startsWith('/api/search/')) {
-                const query = url.pathname.split('/api/search/')[1];
-                return await handleSearch(decodeURIComponent(query), request.url);
-            }
-            
-            if (url.pathname.startsWith('/api/info/')) {
-                const movieId = url.pathname.split('/api/info/')[1];
-                return await handleInfo(movieId);
-            }
-            
-            if (url.pathname.startsWith('/api/sources/')) {
-                const movieId = url.pathname.split('/api/sources/')[1];
-                return await handleSources(movieId, request.url, request);
-            }
-            
-            if (url.pathname === '/api/stream') {
-                return await handleStream(request.url, request);
-            }
-            
-            if (url.pathname === '/api/download') {
-                return await handleDownload(request.url, request);
-            }
-            
-            return new Response(JSON.stringify({
-                status: 'error',
-                message: 'Endpoint not found',
-                availableEndpoints: [
-                    'GET /api/homepage',
-                    'GET /api/trending',
-                    'GET /api/search/:query',
-                    'GET /api/info/:movieId',
-                    'GET /api/sources/:movieId',
-                    'GET /api/stream?url=...',
-                    'GET /api/download?url=...'
-                ]
-            }), {
-                status: 404,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...corsHeaders()
+
+            // Admin (requires auth + admin role)
+            if (path.startsWith('/api/admin/')) {
+                const user = await getAuthUser(request, kv);
+                if (!user) return json({ status: 'error', message: 'Unauthorized' }, 401);
+                if (user.role !== 'admin') return json({ status: 'error', message: 'Forbidden' }, 403);
+
+                if (path === '/api/admin/stats') return handleAdminStats(kv);
+                if (path === '/api/admin/users') return handleAdminUsers(kv);
+                if (path === '/api/admin/ads' || path.startsWith('/api/admin/ads/')) {
+                    const adId = path.split('/api/admin/ads/')[1];
+                    return handleAdminAds(request, kv, method, adId);
                 }
-            });
-            
+                if (path === '/api/admin/content' || path.startsWith('/api/admin/content/')) {
+                    const parts = path.split('/api/admin/content/');
+                    const sub = parts[1] || '';
+                    const action = sub.startsWith('featured') ? 'featured' : null;
+                    const itemId = sub.startsWith('featured/') ? sub.split('featured/')[1] : null;
+                    return handleAdminContent(request, kv, method, action, itemId);
+                }
+                if (path === '/api/admin/settings') return handleAdminSettings(request, kv, method);
+            }
+
+            return json({ status: 'error', message: 'Not found' }, 404);
+
         } catch (error) {
-            return new Response(JSON.stringify({
-                status: 'error',
-                message: 'Internal server error',
-                error: error.message
-            }), {
-                status: 500,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...corsHeaders()
-                }
-            });
+            console.error(error);
+            return json({ status: 'error', message: error.message }, 500);
         }
     }
 };
