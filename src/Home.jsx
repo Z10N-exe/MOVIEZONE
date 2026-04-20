@@ -154,7 +154,7 @@ export default function Home() {
 
       {/* ── Rows ── */}
       <div style={{ marginTop: -36, position: 'relative', zIndex: 10 }}>
-        <Row title="🔥 Trending Now" movies={trending.slice(0, 15)} onMovieClick={goToMovie} />
+        <Row title="Trending Now" movies={trending.slice(0, 15)} onMovieClick={goToMovie} />
 
         {!isPremium && ads[0] && (
           <div onClick={() => window.open(ads[0].targetLink, '_blank')}
@@ -165,9 +165,9 @@ export default function Home() {
           </div>
         )}
 
-        <Row title="📺 TV Shows" movies={tvShows.slice(0, 15)} onMovieClick={goToMovie} />
-        <Row title="🎬 Movies" movies={films.slice(0, 15)} onMovieClick={goToMovie} />
-        <Row title="🆕 New Releases" movies={newReleases} onMovieClick={goToMovie} />
+        <Row title="TV Shows" movies={tvShows.slice(0, 15)} onMovieClick={goToMovie} />
+        <Row title="Movies" movies={films.slice(0, 15)} onMovieClick={goToMovie} />
+        <Row title="New Releases" movies={newReleases} onMovieClick={goToMovie} />
 
         {GENRE_ROWS.map(genre =>
           genreData[genre]?.length > 0 ? (
