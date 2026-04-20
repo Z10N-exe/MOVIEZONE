@@ -740,6 +740,7 @@ app.get('/api/stream/:movieId', async (req, res) => {
         res.status(upstream.status);
         upstream.data.pipe(res);
         upstream.data.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+        res.on('close', () => upstream.data.destroy());
 
     } catch (error) {
         console.error('Stream error:', error.response?.status, error.message);
@@ -757,7 +758,7 @@ function sanitizeFilename(filename) {
         .trim();
 }
 
-// Download endpoint — redirects to CDN URL with proper filename via Content-Disposition
+// Download endpoint — proxies file with okhttp UA (CDN blocks browser UAs)
 app.get('/api/download', async (req, res) => {
     try {
         const downloadUrl = req.query.url;
@@ -775,13 +776,34 @@ app.get('/api/download', async (req, res) => {
         if (quality) filename += `_${quality}p`;
         filename += '.mp4';
 
-        // Redirect browser directly to CDN — avoids Render IP getting blocked
+        console.log(`Downloading: ${filename}`);
+
+        const upstream = await axiosInstance({
+            method: 'GET',
+            url: downloadUrl,
+            responseType: 'stream',
+            timeout: 0,
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+            headers: {
+                'User-Agent': 'okhttp/4.12.0',
+                'Referer': 'https://fmoviesunblocked.net/',
+                'Origin': 'https://fmoviesunblocked.net',
+            }
+        });
+
+        res.setHeader('Content-Type', upstream.headers['content-type'] || 'video/mp4');
+        res.setHeader('Content-Length', upstream.headers['content-length'] || '');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-        res.redirect(302, downloadUrl);
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.status(200);
+        upstream.data.pipe(res);
+        upstream.data.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+        res.on('close', () => upstream.data.destroy());
 
     } catch (error) {
-        console.error('Download error:', error.message);
-        res.status(500).json({ status: 'error', message: error.message });
+        console.error('Download error:', error.response?.status, error.message);
+        if (!res.headersSent) res.status(500).json({ status: 'error', message: error.message });
     }
 });
 
