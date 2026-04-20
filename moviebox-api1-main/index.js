@@ -688,6 +688,18 @@ app.get('/api/sources/:movieId', async (req, res) => {
     }
 });
 
+// Debug endpoint — tests CDN access from this server
+app.get('/api/debug/cdn', async (req, res) => {
+    const testUrl = req.query.url;
+    if (!testUrl) return res.json({ error: 'no url' });
+    try {
+        const r = await axiosInstance({ method: 'HEAD', url: testUrl, headers: { 'User-Agent': 'okhttp/4.12.0', 'Referer': 'https://fmoviesunblocked.net/' }, timeout: 10000 });
+        res.json({ status: r.status, headers: r.headers });
+    } catch (e) {
+        res.json({ error: e.message, status: e.response?.status, responseHeaders: e.response?.headers });
+    }
+});
+
 // Stream endpoint — proxies video using okhttp UA (CDN requires mobile app UA, blocks browsers)
 app.get('/api/stream/:movieId', async (req, res) => {
     try {
@@ -716,15 +728,18 @@ app.get('/api/stream/:movieId', async (req, res) => {
         console.log(`Streaming ${movieId} @ ${source.resolution}p`);
 
         const range = req.headers.range;
+        // Use minimal headers — CDN needs okhttp UA but NOT the MovieBox Host header
         const streamHeaders = {
-            ...DEFAULT_HEADERS,
-            'Host': new URL(source.url).hostname,
+            'User-Agent': 'okhttp/4.12.0',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.5',
             'Referer': 'https://fmoviesunblocked.net/',
             'Origin': 'https://fmoviesunblocked.net',
+            'Connection': 'keep-alive',
+            'X-Forwarded-For': '1.1.1.1',
+            'CF-Connecting-IP': '1.1.1.1',
         };
         if (range) streamHeaders['Range'] = range;
-        // Remove Host from DEFAULT_HEADERS override since CDN host differs
-        delete streamHeaders['Host'];
 
         const upstream = await axiosInstance({
             method: 'GET',
