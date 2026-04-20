@@ -1,5 +1,5 @@
 const axios = require('axios');
-const API_URL = 'https://moviezone-api.onrender.com/api';
+const API_URL = 'https://moviezone-api.nwebeduzion.workers.dev/api';
 
 async function testSeries() {
     try {
