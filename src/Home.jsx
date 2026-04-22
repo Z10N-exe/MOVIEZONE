@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Play, Search, Plus, Check, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from './AppContext';
-import { fetchTrending, fetchAds, getImageUrl, fetchGenre } from './api';
+import { fetchTrending, fetchAds, getImageUrl, fetchGenre, fetchSearch } from './api';
 
 const GENRE_ROWS = [
   'Action', 'Comedy', 'Drama', 'Thriller', 'Horror',
@@ -44,9 +44,24 @@ export default function Home() {
   const { addToMyList, removeFromMyList, isInMyList, isPremium } = useAppContext();
   const [trending, setTrending] = useState([]);
   const [genreData, setGenreData] = useState({});
+  const [popularMovies, setPopularMovies] = useState([]);
+  const [popularSeries, setPopularSeries] = useState([]);
   const [ads, setAds] = useState([]);
   const [heroIndex, setHeroIndex] = useState(0);
   const [listAdded, setListAdded] = useState(false);
+
+  // Well-known recent titles to search for
+  const POPULAR_MOVIE_TITLES = [
+    'Deadpool Wolverine', 'Inside Out 2', 'Dune Part Two', 'Oppenheimer',
+    'Aquaman', 'The Marvels', 'Fast X', 'Mission Impossible',
+    'John Wick 4', 'Guardians Galaxy', 'Ant-Man', 'Black Panther',
+    'Avatar Way of Water', 'Top Gun Maverick', 'Spider-Man No Way Home',
+  ];
+  const POPULAR_SERIES_TITLES = [
+    'The Last of Us', 'House of Dragon', 'Wednesday', 'Stranger Things',
+    'The Bear', 'Succession', 'Squid Game', 'Euphoria',
+    'Yellowstone', 'Andor', 'Loki', 'The Witcher',
+  ];
 
   useEffect(() => {
     fetchTrending().then(data => { if (data?.length) setTrending(data); });
@@ -55,6 +70,27 @@ export default function Home() {
         if (res?.status === 'success') setAds(res.data.filter(a => a.type === 'banner' && a.placement === 'homepage'));
       });
     }
+
+    // Fetch popular movies by searching known titles
+    const fetchPopular = async (titles, setter) => {
+      const results = [];
+      const seen = new Set();
+      for (const title of titles) {
+        try {
+          const items = await fetchSearch(title);
+          if (items?.length) {
+            const first = items[0];
+            if (!seen.has(first.id)) { seen.add(first.id); results.push(first); }
+          }
+        } catch {}
+        if (results.length >= 12) break;
+      }
+      if (results.length) setter(results);
+    };
+
+    fetchPopular(POPULAR_MOVIE_TITLES, setPopularMovies);
+    setTimeout(() => fetchPopular(POPULAR_SERIES_TITLES, setPopularSeries), 1000);
+
     // Fetch first 8 genre rows immediately
     GENRE_ROWS.slice(0, 8).forEach(genre => {
       fetchGenre(genre).then(movies => {
@@ -169,6 +205,8 @@ const goToMovie = (movie) => {
           </div>
         )}
 
+        <Row title="Popular Movies" movies={popularMovies} onMovieClick={goToMovie} />
+        <Row title="Popular Series" movies={popularSeries} onMovieClick={goToMovie} />
         <Row title="TV Shows" movies={tvShows.slice(0, 15)} onMovieClick={goToMovie} />
         <Row title="Movies" movies={films.slice(0, 15)} onMovieClick={goToMovie} />
         <Row title="New Releases" movies={newReleases} onMovieClick={goToMovie} />
