@@ -31,3 +31,5 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://moviezone-api.nwebeduzion.workers.dev/api
+      - key: VITE_PAYSTACK_KEY
+        value: pk_live_REPLACE_WITH_YOUR_KEY
