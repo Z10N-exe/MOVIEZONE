@@ -21,15 +21,15 @@ const PlanCard = ({ title, price, isSelected }) => (
 
 export default function Premium() {
   const navigate = useNavigate();
-  const { isPremium, setIsPremium } = useAppContext();
+  const { isPremium, user } = useAppContext();
 
   const handleSubscribe = () => {
     if (isPremium) {
        alert('You are already a premium member.');
        return;
     }
-    setIsPremium(true);
-    alert('Payment successful! ₦1000 deducted. You are now a Premium member.');
+    // TODO: integrate Paystack payment
+    alert('Paystack integration coming soon. Contact admin to activate premium.');
     navigate('/profile');
   };
 
@@ -52,7 +52,7 @@ export default function Premium() {
         <p style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 14 }}><span style={{ color: 'var(--primary-red)' }}><Check size={16} /></span> Video & Audio Quality is Better.</p>
       </div>
 
-      <div style={{ position: 'absolute', bottom: 24, left: 20, right: 20 }}>
+      <div style={{ paddingBottom: 100 }}>
          <button onClick={handleSubscribe} className={isPremium ? "button-secondary" : "button-primary"} style={{ boxShadow: isPremium ? 'none' : '0 4px 20px rgba(229, 9, 20, 0.4)' }}>
            {isPremium ? 'Manage Subscription' : 'Subscribe with Paystack'}
          </button>
