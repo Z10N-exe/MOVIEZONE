@@ -115,12 +115,18 @@ function processResponse(data) {
 
 // ─── ROUTE HANDLERS ──────────────────────────────────────────────────────────
 
-async function handleTrending(url) {
+async function handleTrending(url, kv) {
+    // Cache in KV for 1 hour so feed is stable across refreshes
+    const cached = await kvGet(kv, 'cache:trending');
+    if (cached && Date.now() - cached.ts < 3600000) return json({ status: 'success', data: cached.data });
+
     const u = new URL(url);
     const params = new URLSearchParams({ page: u.searchParams.get('page') || 0, perPage: 18, uid: '5591179548772780352' });
     const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/trending?${params}`);
     const data = processResponse(await r.json());
     if (data.items) data.items = data.items.map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+
+    await kvSet(kv, 'cache:trending', { data, ts: Date.now() });
     return json({ status: 'success', data });
 }
 
@@ -279,8 +285,34 @@ async function handleSignup(request, kv) {
     await kvSet(kv, `userid:${id}`, email.toLowerCase());
     await kvSet(kv, 'user:count', userCount + 1);
 
+    // Maintain user index for listing
+    const index = (await kvGet(kv, 'user:index')) || [];
+    if (!index.includes(email.toLowerCase())) {
+        index.push(email.toLowerCase());
+        await kvSet(kv, 'user:index', index);
+    }
+
     const token = await signJWT({ id, role: user.role });
     return json({ status: 'success', token, user: { id, name, email: user.email, role: user.role, isPremium: false } });
+}
+
+async function bootstrapAdmin(kv) {
+    const email = 'eman@gmail.com';
+    const existing = await kvGet(kv, `user:${email}`);
+    if (existing) return json({ status: 'ok', message: 'Admin already exists' });
+
+    const id = crypto.randomUUID();
+    const user = { id, name: 'Eman', email, password: await hashPassword('123456'), role: 'admin', isPremium: true, createdAt: new Date().toISOString() };
+    const userCount = (await kvGet(kv, 'user:count')) || 0;
+
+    await kvSet(kv, `user:${email}`, user);
+    await kvSet(kv, `userid:${id}`, email);
+    await kvSet(kv, 'user:count', userCount + 1);
+
+    const index = (await kvGet(kv, 'user:index')) || [];
+    if (!index.includes(email)) { index.push(email); await kvSet(kv, 'user:index', index); }
+
+    return json({ status: 'success', message: 'Admin account created' });
 }
 
 async function handleLogin(request, kv) {
@@ -314,8 +346,12 @@ async function handleAdminStats(kv) {
 
 async function handleAdminUsers(kv) {
     const count = (await kvGet(kv, 'user:count')) || 0;
-    // KV doesn't support listing easily — return count info
-    return json({ status: 'success', data: [], meta: { total: count } });
+    // Scan known users by iterating stored index
+    const index = (await kvGet(kv, 'user:index')) || [];
+    const users = (await Promise.all(index.map(email => kvGet(kv, `user:${email}`))))
+        .filter(Boolean)
+        .map(u => ({ id: u.id, name: u.name, email: u.email, role: u.role, isPremium: u.isPremium, createdAt: u.createdAt }));
+    return json({ status: 'success', data: users, meta: { total: count } });
 }
 
 async function handleAdminAds(request, kv, method, adId) {
@@ -378,7 +414,7 @@ export default {
 
         try {
             // Public movie endpoints
-            if (path === '/api/trending') return handleTrending(request.url);
+            if (path === '/api/trending') return handleTrending(request.url, kv);
             if (path === '/api/homepage') return handleHomepage();
             if (path.startsWith('/api/search/')) return handleSearch(decodeURIComponent(path.split('/api/search/')[1]), request.url);
             // Genre browse: /api/genre/Action
@@ -390,6 +426,9 @@ export default {
             if (path.startsWith('/api/sources/')) return handleSources(path.split('/api/sources/')[1], request.url, request);
             if (path === '/api/stream') return handleStream(request.url, request);
             if (path === '/api/download') return handleDownload(request.url, request);
+
+            // Bootstrap admin (run once to seed admin account)
+            if (path === '/api/bootstrap' && method === 'GET') return bootstrapAdmin(kv);
 
             // Public ads & settings
             if (path === '/api/ads') {
