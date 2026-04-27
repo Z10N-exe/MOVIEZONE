@@ -58,25 +58,34 @@ const MovieDetails = () => {
   const isSeries = movie?.subjectType === 2;
   const inList = movie && isInMyList(movieboxId);
 
+  const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+
   const handlePlay = () => {
     const base = `/player/${movieboxId}`;
-    navigate(isSeries ? `${base}?season=${selectedSeason}&episode=${selectedEpisode}` : base);
+    const title = movie.title || movie.name || '';
+    const year = movie.year || (movie.releaseDate ? new Date(movie.releaseDate).getFullYear() : '') || '';
+    const params = new URLSearchParams();
+    if (title) params.set('t', title);
+    if (year) params.set('y', String(year));
+    if (isSeries) { params.set('season', selectedSeason); params.set('episode', selectedEpisode); }
+    navigate(`${base}?${params.toString()}`);
   };
 
-  const handleDownload = () => {
-    if (!sources.length) { alert('No download links found for this title'); return; }
-    const best = sources.reduce((a, b) => (Number(b.quality) > Number(a.quality) ? b : a), sources[0]);
+  const handleDownload = (src) => {
+    if (!src) return;
     addDownload({
       id: movieboxId,
       title: movie.title || movie.name,
       imgUrl: getImageUrl(movie.thumbnail || movie.cover?.url),
-      size: best.size || '',
+      size: src.size || '',
+      quality: src.quality,
       season: isSeries ? selectedSeason : null,
       episode: isSeries ? selectedEpisode : null,
     });
     const a = document.createElement('a');
-    a.href = best.downloadUrl; a.download = '';
+    a.href = src.downloadUrl || src.streamUrl; a.download = '';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setShowDownloadMenu(false);
   };
 
   const handleMyList = () => {
@@ -145,10 +154,24 @@ const MovieDetails = () => {
             <Play size={18} fill="black" />
             {isSeries ? `Play S${selectedSeason} E${selectedEpisode}` : 'Play'}
           </button>
-          <button onClick={handleDownload}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#222', color: 'white', width: 50, borderRadius: 15, border: 'none', cursor: 'pointer' }}>
-            <Download size={20} />
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button onClick={() => { if (!sources.length) { alert('No download links found'); return; } setShowDownloadMenu(v => !v); }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#222', color: 'white', width: 50, height: '100%', minHeight: 48, borderRadius: 15, border: 'none', cursor: 'pointer' }}>
+              <Download size={20} />
+            </button>
+            {showDownloadMenu && sources.length > 0 && (
+              <div style={{ position: 'absolute', bottom: '110%', left: '50%', transform: 'translateX(-50%)', background: '#1a1a1a', borderRadius: 12, padding: '8px 0', minWidth: 150, boxShadow: '0 8px 32px rgba(0,0,0,0.8)', border: '1px solid #333', zIndex: 100 }}>
+                <p style={{ padding: '4px 16px', fontSize: 10, color: '#666', textTransform: 'uppercase', letterSpacing: 1, margin: 0 }}>Download Quality</p>
+                {[...sources].sort((a, b) => Number(b.quality) - Number(a.quality)).map(s => (
+                  <div key={s.quality} onClick={() => handleDownload(s)}
+                    style={{ padding: '11px 16px', cursor: 'pointer', fontSize: 14, color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                    <span>{s.quality}p</span>
+                    {s.size && <span style={{ fontSize: 11, color: '#888' }}>{s.size}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <button onClick={handleMyList}
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: inList ? '#1db954' : '#222', color: 'white', width: 50, borderRadius: 15, border: 'none', cursor: 'pointer' }}>
             {inList ? <Check size={20} /> : <Plus size={20} />}
