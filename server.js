@@ -27,10 +27,34 @@ app.use(express.static(distPath, {
     }
 }));
 
+// Health check endpoint
+app.get('/ping', (req, res) => {
+    res.status(200).send('Pong!');
+});
+
 // SPA fallback — all routes serve index.html so React Router handles them
 app.use((req, res) => {
     res.sendFile(path.join(distPath, 'index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Frontend serving on port ${PORT}`));
+
+// Self-pinging mechanism to keep server awake on Render
+const keepAlive = () => {
+    const url = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL;
+    if (url) {
+        console.log(`Frontend keep-alive system initialized for ${url}`);
+        setInterval(() => {
+            fetch(`${url}/ping`)
+                .then(() => console.log(`[${new Date().toISOString()}] Frontend keep-alive ping successful`))
+                .catch(err => console.error(`[${new Date().toISOString()}] Frontend keep-alive ping failed:`, err.message));
+        }, 13 * 60 * 1000);
+    } else {
+        console.log('Frontend keep-alive skipped: RENDER_EXTERNAL_URL not set');
+    }
+};
+
+app.listen(PORT, () => {
+    console.log(`Frontend serving on port ${PORT}`);
+    keepAlive();
+});

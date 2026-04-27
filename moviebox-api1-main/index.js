@@ -213,6 +213,11 @@ async function makeApiRequestWithCookies(url, options = {}) {
 // API Routes
 
 // Health check
+app.get('/api/ping', (req, res) => {
+    res.status(200).json({ status: 'success', message: 'Pong!' });
+});
+
+// Documentation Page
 app.get('/', (req, res) => {
     const html = `
 <!DOCTYPE html>
@@ -1119,8 +1124,29 @@ if (process.env.NODE_ENV === 'production') {
     });
 }
 
+// Self-pinging mechanism to keep server awake on Render
+const keepAlive = () => {
+    const url = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL;
+    if (url) {
+        console.log(`Keep-alive system initialized for ${url}`);
+        // Ping every 13 minutes (Render timeout is 15 mins)
+        setInterval(async () => {
+            try {
+                // Use axios which is already available in this file
+                await axios.get(`${url}/api/ping`);
+                console.log(`[${new Date().toISOString()}] Keep-alive ping successful`);
+            } catch (error) {
+                console.error(`[${new Date().toISOString()}] Keep-alive ping failed:`, error.message);
+            }
+        }, 13 * 60 * 1000);
+    } else {
+        console.log('Keep-alive system skipped: RENDER_EXTERNAL_URL or APP_URL not set');
+    }
+};
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`MovieBox API Server running on http://0.0.0.0:${PORT}`);
+    keepAlive();
 });
 
 module.exports = app;
