@@ -624,6 +624,48 @@ app.get('/api/info/:movieId', async (req, res) => {
     }
 });
 
+// Resolve TMDB id → MovieBox id
+app.get('/api/tmdb-resolve/:tmdbId', async (req, res) => {
+    try {
+        const { tmdbId } = req.params;
+        const TMDB_KEY = process.env.TMDB_TOKEN || process.env.TMDB_KEY;
+        if (!TMDB_KEY) return res.status(500).json({ status: 'error', message: 'TMDB key not configured' });
+
+        const tmdbBase = 'https://api.themoviedb.org/3';
+        const headers = { 'Authorization': `Bearer ${TMDB_KEY}`, 'Accept': 'application/json' };
+
+        let title = null, mediaType = 'movie';
+        try {
+            const r = await axios.get(`${tmdbBase}/movie/${tmdbId}`, { headers });
+            if (r.data?.title) { title = r.data.title; mediaType = 'movie'; }
+        } catch {}
+        if (!title) {
+            try {
+                const r = await axios.get(`${tmdbBase}/tv/${tmdbId}`, { headers });
+                if (r.data?.name) { title = r.data.name; mediaType = 'tv'; }
+            } catch {}
+        }
+        if (!title) return res.status(404).json({ status: 'error', message: 'TMDB title not found' });
+
+        const searchRes = await makeApiRequestWithCookies(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
+            method: 'POST',
+            data: { keyword: title, page: 1, perPage: 10, subjectType: 0 },
+        });
+        const data = processApiResponse(searchRes);
+        const items = data?.items || [];
+        if (!items.length) return res.status(404).json({ status: 'error', message: 'Not found on MovieBox' });
+
+        const titleLower = title.toLowerCase();
+        const best = items.find(i => (i.title || i.name || '').toLowerCase() === titleLower) || items[0];
+        const movieboxId = best.subjectId || best.id;
+
+        res.json({ status: 'success', data: { movieboxId: String(movieboxId), title, mediaType } });
+    } catch (error) {
+        console.error('TMDB resolve error:', error.message);
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
+
 // ─── STREAMING & SOURCES ────────────────────────────────────────────────────
 
 // Returns signed CDN URLs. Also used by /api/stream to pipe video.

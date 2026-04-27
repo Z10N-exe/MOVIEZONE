@@ -233,6 +233,43 @@ async function handleSearch(query, url) {
     return json({ status: 'success', data });
 }
 
+// Resolve a TMDB numeric id → MovieBox id by fetching the TMDB title then searching MovieBox
+async function handleTmdbResolve(tmdbId, tmdbKey) {
+    if (!tmdbKey) return json({ status: 'error', message: 'TMDB key not configured' }, 500);
+
+    // Try movie first, then TV
+    let title = null;
+    let mediaType = 'movie';
+    try {
+        const movieRes = await tmdbFetch(`/movie/${tmdbId}`, tmdbKey);
+        if (movieRes.title) { title = movieRes.title; mediaType = 'movie'; }
+    } catch {}
+    if (!title) {
+        try {
+            const tvRes = await tmdbFetch(`/tv/${tmdbId}`, tmdbKey);
+            if (tvRes.name) { title = tvRes.name; mediaType = 'tv'; }
+        } catch {}
+    }
+    if (!title) return json({ status: 'error', message: 'TMDB title not found' }, 404);
+
+    // Search MovieBox for this title
+    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: title, page: 1, perPage: 10, subjectType: 0 }),
+    });
+    const data = processResponse(await r.json());
+    const items = data?.items || [];
+    if (!items.length) return json({ status: 'error', message: 'Not found on MovieBox' }, 404);
+
+    // Pick best match — prefer exact title match
+    const titleLower = title.toLowerCase();
+    const best = items.find(i => (i.title || i.name || '').toLowerCase() === titleLower) || items[0];
+    const movieboxId = best.subjectId || best.id;
+
+    return json({ status: 'success', data: { movieboxId: String(movieboxId), title, mediaType } });
+}
+
 async function handleInfo(movieId) {
     const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${movieId}`);
     const data = processResponse(await r.json());
@@ -504,6 +541,7 @@ export default {
                 return handleGenre(genre, request.url, kv, tmdbKey);
             }
             if (path.startsWith('/api/info/')) return handleInfo(path.split('/api/info/')[1]);
+            if (path.startsWith('/api/tmdb-resolve/')) return handleTmdbResolve(path.split('/api/tmdb-resolve/')[1], tmdbKey);
             if (path.startsWith('/api/sources/')) return handleSources(path.split('/api/sources/')[1], request.url, request);
             if (path === '/api/stream') return handleStream(request.url, request);
             if (path === '/api/download') return handleDownload(request.url, request);
