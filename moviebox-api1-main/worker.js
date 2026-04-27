@@ -1,9 +1,36 @@
 // MovieZone Cloudflare Worker — Full API with streaming, auth, and admin
 // Deploy: wrangler deploy
 // KV namespace required: MOVIEZONE_KV (bind in wrangler.toml)
+// Worker secret required: TMDB_KEY (set via: wrangler secret put TMDB_KEY)
 
 const SELECTED_HOST = "h5.aoneroom.com";
 const HOST_URL = `https://${SELECTED_HOST}`;
+
+// TMDB base URL — used for real trending/genre browsing
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+
+// Normalize a TMDB item to our standard shape
+function normalizeTmdb(item) {
+    return {
+        id: String(item.id),
+        tmdbId: item.id,
+        title: item.title || item.name,
+        name: item.title || item.name,
+        thumbnail: item.poster_path ? `https://image.tmdb.org/t/p/w342${item.poster_path}` : '',
+        backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : '',
+        score: item.vote_average,
+        year: (item.release_date || item.first_air_date || '').split('-')[0],
+        overview: item.overview,
+        subjectType: item.media_type === 'tv' || item.first_air_date ? 2 : 1,
+        genre: item.genre_ids?.join(',') || '',
+        source: 'tmdb',
+    };
+}
+
+async function tmdbFetch(path, apiKey) {
+    const r = await fetch(`${TMDB_BASE}${path}&api_key=${apiKey}`);
+    return r.json();
+}
 
 const DEFAULT_HEADERS = {
     'X-Client-Info': '{"timezone":"Africa/Nairobi"}',
@@ -115,18 +142,69 @@ function processResponse(data) {
 
 // ─── ROUTE HANDLERS ──────────────────────────────────────────────────────────
 
-async function handleTrending(url, kv) {
+async function handleTrending(url, kv, tmdbKey) {
     // Cache in KV for 1 hour so feed is stable across refreshes
     const cached = await kvGet(kv, 'cache:trending');
     if (cached && Date.now() - cached.ts < 3600000) return json({ status: 'success', data: cached.data });
 
-    const u = new URL(url);
-    const params = new URLSearchParams({ page: u.searchParams.get('page') || 0, perPage: 18, uid: '5591179548772780352' });
-    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/trending?${params}`);
-    const data = processResponse(await r.json());
-    if (data.items) data.items = data.items.map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+    let items = [];
 
+    if (tmdbKey) {
+        // Use TMDB trending/all/week for real trending content
+        const [moviesRes, tvRes] = await Promise.all([
+            tmdbFetch('/trending/movie/week?', tmdbKey),
+            tmdbFetch('/trending/tv/week?', tmdbKey),
+        ]);
+        const movies = (moviesRes.results || []).map(i => normalizeTmdb({ ...i, media_type: 'movie' }));
+        const tv = (tvRes.results || []).map(i => normalizeTmdb({ ...i, media_type: 'tv' }));
+        // Interleave movies and tv for variety
+        items = movies.slice(0, 10).flatMap((m, i) => tv[i] ? [m, tv[i]] : [m]);
+    } else {
+        // Fallback to MovieBox trending
+        const u = new URL(url);
+        const params = new URLSearchParams({ page: u.searchParams.get('page') || 0, perPage: 18, uid: '5591179548772780352' });
+        const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/trending?${params}`);
+        const data = processResponse(await r.json());
+        items = (data.items || []).map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+    }
+
+    const data = { items };
     await kvSet(kv, 'cache:trending', { data, ts: Date.now() });
+    return json({ status: 'success', data });
+}
+
+async function handleGenre(genre, url, kv, tmdbKey) {
+    const cacheKey = `cache:genre:${genre.toLowerCase()}`;
+    const cached = await kvGet(kv, cacheKey);
+    if (cached && Date.now() - cached.ts < 3600000) return json({ status: 'success', data: cached.data });
+
+    // TMDB genre IDs map
+    const GENRE_MAP = {
+        'action': 28, 'comedy': 35, 'drama': 18, 'thriller': 53, 'horror': 27,
+        'sci-fi': 878, 'romance': 10749, 'adventure': 12, 'animation': 16,
+        'crime': 80, 'documentary': 99, 'fantasy': 14, 'mystery': 9648,
+        'history': 36, 'music': 10402, 'war': 10752, 'western': 37,
+        'biography': 36, 'sport': 10770, 'anime': 16,
+    };
+    const genreId = GENRE_MAP[genre.toLowerCase()];
+
+    let items = [];
+    if (tmdbKey && genreId) {
+        const res = await tmdbFetch(`/discover/movie?with_genres=${genreId}&sort_by=popularity.desc&page=1&`, tmdbKey);
+        items = (res.results || []).map(i => normalizeTmdb({ ...i, media_type: 'movie' }));
+    } else {
+        // Fallback: MovieBox search
+        const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword: genre, page: 1, perPage: 20, subjectType: 0 }),
+        });
+        const data = processResponse(await r.json());
+        items = (data.items || []).map(i => ({ ...i, id: i.subjectId || i.id, thumbnail: i.thumbnail || i.cover?.url || '' }));
+    }
+
+    const data = { items };
+    await kvSet(kv, cacheKey, { data, ts: Date.now() });
     return json({ status: 'success', data });
 }
 
@@ -409,18 +487,19 @@ export default {
         const path = url.pathname;
         const method = request.method;
         const kv = env.MOVIEZONE_KV;
+        const tmdbKey = env.TMDB_KEY || null;
 
         if (method === 'OPTIONS') return new Response(null, { headers: cors() });
 
         try {
             // Public movie endpoints
-            if (path === '/api/trending') return handleTrending(request.url, kv);
+            if (path === '/api/trending') return handleTrending(request.url, kv, tmdbKey);
             if (path === '/api/homepage') return handleHomepage();
             if (path.startsWith('/api/search/')) return handleSearch(decodeURIComponent(path.split('/api/search/')[1]), request.url);
             // Genre browse: /api/genre/Action
             if (path.startsWith('/api/genre/')) {
                 const genre = decodeURIComponent(path.split('/api/genre/')[1]);
-                return handleSearch(genre, `${request.url}&genre=${encodeURIComponent(genre)}`);
+                return handleGenre(genre, request.url, kv, tmdbKey);
             }
             if (path.startsWith('/api/info/')) return handleInfo(path.split('/api/info/')[1]);
             if (path.startsWith('/api/sources/')) return handleSources(path.split('/api/sources/')[1], request.url, request);
