@@ -27,8 +27,10 @@ function normalizeTmdb(item) {
     };
 }
 
-async function tmdbFetch(path, apiKey) {
-    const r = await fetch(`${TMDB_BASE}${path}&api_key=${apiKey}`);
+async function tmdbFetch(path, token) {
+    const r = await fetch(`${TMDB_BASE}${path}`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' }
+    });
     return r.json();
 }
 
@@ -152,8 +154,8 @@ async function handleTrending(url, kv, tmdbKey) {
     if (tmdbKey) {
         // Use TMDB trending/all/week for real trending content
         const [moviesRes, tvRes] = await Promise.all([
-            tmdbFetch('/trending/movie/week?', tmdbKey),
-            tmdbFetch('/trending/tv/week?', tmdbKey),
+            tmdbFetch('/trending/movie/week', tmdbKey),
+            tmdbFetch('/trending/tv/week', tmdbKey),
         ]);
         const movies = (moviesRes.results || []).map(i => normalizeTmdb({ ...i, media_type: 'movie' }));
         const tv = (tvRes.results || []).map(i => normalizeTmdb({ ...i, media_type: 'tv' }));
@@ -190,7 +192,7 @@ async function handleGenre(genre, url, kv, tmdbKey) {
 
     let items = [];
     if (tmdbKey && genreId) {
-        const res = await tmdbFetch(`/discover/movie?with_genres=${genreId}&sort_by=popularity.desc&page=1&`, tmdbKey);
+        const res = await tmdbFetch(`/discover/movie?with_genres=${genreId}&sort_by=popularity.desc&page=1`, tmdbKey);
         items = (res.results || []).map(i => normalizeTmdb({ ...i, media_type: 'movie' }));
     } else {
         // Fallback: MovieBox search
@@ -487,7 +489,7 @@ export default {
         const path = url.pathname;
         const method = request.method;
         const kv = env.MOVIEZONE_KV;
-        const tmdbKey = env.TMDB_KEY || null;
+        const tmdbKey = env.TMDB_TOKEN || env.TMDB_KEY || null;
 
         if (method === 'OPTIONS') return new Response(null, { headers: cors() });
 
@@ -508,6 +510,11 @@ export default {
 
             // Bootstrap admin (run once to seed admin account)
             if (path === '/api/bootstrap' && method === 'GET') return bootstrapAdmin(kv);
+            // Cache bust — clears trending/genre KV cache so TMDB data loads fresh
+            if (path === '/api/cache/clear' && method === 'GET') {
+                await kvSet(kv, 'cache:trending', null);
+                return json({ status: 'success', message: 'Cache cleared' });
+            }
 
             // Public ads & settings
             if (path === '/api/ads') {
