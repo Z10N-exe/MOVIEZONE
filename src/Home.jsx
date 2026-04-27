@@ -131,7 +131,8 @@ export default function Home() {
 
 const goToMovie = (movie) => {
     const titleParam = movie.title || movie.name || '';
-    navigate(`/movie/${movie.id}?t=${encodeURIComponent(titleParam)}`);
+    const yearParam = movie.year || '';
+    navigate(`/movie/${movie.id}?t=${encodeURIComponent(titleParam)}&y=${yearParam}`);
   };
   const tvShows = useMemo(() => trending.filter(m => m.subjectType === 2), [trending]);
   const films = useMemo(() => trending.filter(m => m.subjectType === 1), [trending]);
@@ -168,11 +169,11 @@ const goToMovie = (movie) => {
             {featured.genre && <span style={{ border: '1px solid rgba(255,255,255,0.5)', padding: '1px 8px', borderRadius: 3, fontSize: 10 }}>{featured.genre?.split(',')[0]?.trim()}</span>}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button onClick={() => navigate(`/player/${featured.id}?t=${encodeURIComponent(featured.title || featured.name || '')}`)}
+            <button onClick={() => navigate(`/player/${featured.id}?t=${encodeURIComponent(featured.title || featured.name || '')}&y=${featured.year || ''}`)}
               style={{ display: 'flex', alignItems: 'center', gap: 7, background: '#fff', color: '#000', border: 'none', padding: '9px 22px', borderRadius: 5, fontWeight: 700, fontSize: 15, cursor: 'pointer' }}>
               <Play size={18} fill="black" /> {featured.subjectType === 2 ? 'Watch' : 'Play'}
             </button>
-            <button onClick={() => navigate(`/movie/${featured.id}?t=${encodeURIComponent(featured.title || featured.name || '')}`)}
+            <button onClick={() => navigate(`/movie/${featured.id}?t=${encodeURIComponent(featured.title || featured.name || '')}&y=${featured.year || ''}`)}
               style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(109,109,110,0.7)', color: '#fff', border: 'none', padding: '9px 18px', borderRadius: 5, fontWeight: 600, fontSize: 14, cursor: 'pointer', backdropFilter: 'blur(4px)' }}>
               <Info size={18} /> More Info
             </button>

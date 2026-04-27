@@ -18,15 +18,16 @@ const MovieDetails = () => {
   const [movieboxId, setMovieboxId] = useState(null);
   const location = useLocation();
 
-  // Step 1: get title hint from URL param
+  // Step 1: get title + year hints from URL params
   const titleHint = new URLSearchParams(location.search).get('t') || '';
+  const yearHint = new URLSearchParams(location.search).get('y') || '';
 
-  // Step 2: fetch info — pass id + title hint, worker resolves to MovieBox id server-side
+  // Step 2: fetch info — pass id + hints, worker resolves to MovieBox id server-side
   useEffect(() => {
     if (!id) return;
     setLoading(true); setError(null); setMovie(null); setMovieboxId(null);
 
-    fetchInfo(id, titleHint).then(infoRes => {
+    fetchInfo(id, titleHint, yearHint).then(infoRes => {
       if (infoRes?.subject) {
         // Worker returns the resolved movieboxId on the subject
         const mbId = infoRes.subject.movieboxId || id;
@@ -49,7 +50,7 @@ const MovieDetails = () => {
   useEffect(() => {
     if (!movieboxId || !movie) return;
     const isSeries = movie.subjectType === 2;
-    fetchSources(movieboxId, isSeries ? selectedSeason : 0, isSeries ? selectedEpisode : 0, titleHint)
+    fetchSources(movieboxId, isSeries ? selectedSeason : 0, isSeries ? selectedEpisode : 0, titleHint, yearHint)
       .then(res => setSources(res || []))
       .catch(() => setSources([]));
   }, [movieboxId, movie, selectedSeason, selectedEpisode]);

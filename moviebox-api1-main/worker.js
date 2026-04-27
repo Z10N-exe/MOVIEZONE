@@ -270,30 +270,53 @@ async function handleTmdbResolve(tmdbId, tmdbKey) {
     return json({ status: 'success', data: { movieboxId: String(movieboxId), title, mediaType } });
 }
 
+// Pick the best MovieBox match from a list of search results given title + year hints
+function pickBestMatch(items, titleHint, yearHint) {
+    if (!items?.length) return null;
+    const tl = titleHint.toLowerCase().trim();
+    const yr = String(yearHint || '').trim();
+
+    let best = null, bestScore = -1;
+    for (const item of items) {
+        const itemTitle = (item.title || item.name || '').toLowerCase().trim();
+        const itemYear = String(item.year || item.releaseDate || '').slice(0, 4);
+        let score = 0;
+        if (itemTitle === tl) score += 10;
+        else if (itemTitle.includes(tl) || tl.includes(itemTitle)) score += 4;
+        if (yr && itemYear === yr) score += 8;
+        else if (yr && Math.abs(Number(itemYear) - Number(yr)) <= 1) score += 3;
+        if (score > bestScore) { bestScore = score; best = item; }
+    }
+    return best || items[0];
+}
+
+// Resolve a short/TMDB id to a MovieBox id using title + year
+async function resolveToMovieBoxId(id, titleHint, yearHint) {
+    if (/^\d{15,}$/.test(String(id))) return String(id); // already a MovieBox id
+    if (!titleHint) return String(id); // no hint, pass through and hope for the best
+    try {
+        const sr = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword: titleHint, page: 1, perPage: 10, subjectType: 0 }),
+        });
+        const sd = processResponse(await sr.json());
+        const best = pickBestMatch(sd?.items, titleHint, yearHint);
+        if (best) return String(best.subjectId || best.id);
+    } catch {}
+    return String(id);
+}
+
 async function handleInfo(movieId, url) {
-    // If movieId looks like a short TMDB id, try to resolve via title param first
     const u = new URL(url);
     const titleHint = u.searchParams.get('t') || '';
+    const yearHint = u.searchParams.get('y') || '';
 
-    let mbId = movieId;
-    if (!/^\d{15,}$/.test(movieId) && titleHint) {
-        // Search MovieBox by title to get the real id
-        try {
-            const sr = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keyword: titleHint, page: 1, perPage: 5, subjectType: 0 }),
-            });
-            const sd = processResponse(await sr.json());
-            const best = sd?.items?.[0];
-            if (best) mbId = String(best.subjectId || best.id);
-        } catch {}
-    }
+    const mbId = await resolveToMovieBoxId(movieId, titleHint, yearHint);
 
     const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${mbId}`);
     const data = processResponse(await r.json());
     if (data.subject?.cover?.url) data.subject.thumbnail = data.subject.cover.url;
-    // Return the resolved moviebox id so the client can use it for sources
     if (data.subject) data.subject.movieboxId = mbId;
     return json({ status: 'success', data });
 }
@@ -309,21 +332,9 @@ async function handleSources(movieId, url, request) {
     const season = u.searchParams.get('season') || 0;
     const episode = u.searchParams.get('episode') || 0;
     const titleHint = u.searchParams.get('t') || '';
+    const yearHint = u.searchParams.get('y') || '';
 
-    // Resolve short/TMDB ids to MovieBox ids via title search
-    let mbId = movieId;
-    if (!/^\d{15,}$/.test(movieId) && titleHint) {
-        try {
-            const sr = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ keyword: titleHint, page: 1, perPage: 5, subjectType: 0 }),
-            });
-            const sd = processResponse(await sr.json());
-            const best = sd?.items?.[0];
-            if (best) mbId = String(best.subjectId || best.id);
-        } catch {}
-    }
+    const mbId = await resolveToMovieBoxId(movieId, titleHint, yearHint);
 
     const infoR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${mbId}`);
     const info = processResponse(await infoR.json());

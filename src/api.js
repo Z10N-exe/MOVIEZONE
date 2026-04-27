@@ -85,12 +85,13 @@ export const fetchGenre = async (genre) => {
     }
 };
 
-export const fetchSources = async (movieId, season = 0, episode = 0, titleHint = '') => {
+export const fetchSources = async (movieId, season = 0, episode = 0, titleHint = '', yearHint = '') => {
     try {
         const url = new URL(`${API_URL}/sources/${movieId}`);
         if (season) url.searchParams.append('season', season);
         if (episode) url.searchParams.append('episode', episode);
         if (titleHint) url.searchParams.append('t', titleHint);
+        if (yearHint) url.searchParams.append('y', yearHint);
 
         const response = await fetch(url);
         const json = await response.json();
@@ -101,10 +102,11 @@ export const fetchSources = async (movieId, season = 0, episode = 0, titleHint =
     }
 };
 
-export const fetchInfo = async (movieId, titleHint = '') => {
+export const fetchInfo = async (movieId, titleHint = '', yearHint = '') => {
     try {
         const url = new URL(`${API_URL}/info/${movieId}`);
         if (titleHint) url.searchParams.append('t', titleHint);
+        if (yearHint) url.searchParams.append('y', yearHint);
         const response = await fetch(url);
         const json = await response.json();
         return json.data || null;
