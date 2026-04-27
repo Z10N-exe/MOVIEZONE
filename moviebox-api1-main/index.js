@@ -642,10 +642,13 @@ async function getDownloads(movieId, season, episode) {
     for (const mirror of mirrors) {
         try {
             const mirrorUrl = `https://${mirror}`;
+            const dlParams = { subjectId: movieId };
+            if (season) dlParams.se = season;
+            if (episode) dlParams.ep = episode;
             const dlRes = await axiosInstance({
                 method: 'GET',
                 url: `${mirrorUrl}/wefeed-h5-bff/web/subject/download`,
-                params: { subjectId: movieId, se: season, ep: episode },
+                params: dlParams,
                 headers: {
                     ...DEFAULT_HEADERS,
                     'Host': mirror,

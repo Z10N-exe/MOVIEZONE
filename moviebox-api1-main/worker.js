@@ -170,7 +170,8 @@ async function handleSources(movieId, url, request) {
     const detailPath = info?.subject?.detailPath;
     if (!detailPath) return json({ status: 'success', data: { downloads: [], processedSources: [] } });
 
-    const dlR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/download?subjectId=${movieId}&se=${season}&ep=${episode}`, {
+    const dlParams = `subjectId=${movieId}${season ? `&se=${season}&ep=${episode}` : ''}`;
+    const dlR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/download?${dlParams}`, {
         headers: { 'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`, 'Origin': 'https://fmoviesunblocked.net' }
     });
     const dlData = processResponse(await dlR.json());
