@@ -70,7 +70,7 @@ const MovieDetails = () => {
     if (!targetId || !movie) return;
     
     const fetchEpisodeSources = async () => {
-       const isSeries = movie.subjectType === 2 || seasonsData.length > 0;
+       const isSeries = movie.subjectType === 2;
        const sourcesRes = await fetchSources(targetId, isSeries ? selectedSeason : 0, isSeries ? selectedEpisode : 0);
        setSources(sourcesRes || []);
     };
@@ -132,7 +132,7 @@ const MovieDetails = () => {
           <button 
             onClick={() => {
               const base = `/player/${targetId}`;
-              const isSeries = movie.subjectType === 2 || seasonsData.length > 0;
+              const isSeries = movie.subjectType === 2;
               if (isSeries) {
                 navigate(`${base}?season=${selectedSeason}&episode=${selectedEpisode}`);
               } else {
@@ -147,7 +147,7 @@ const MovieDetails = () => {
             <button 
               onClick={() => {
                 if (sources.length > 0) {
-                  const isSeries = movie.subjectType === 2 || seasonsData.length > 0;
+                  const isSeries = movie.subjectType === 2;
                   // Pick best quality available (highest resolution)
                   const best = sources.reduce((a, b) => (Number(b.quality) > Number(a.quality) ? b : a), sources[0]);
                   addDownload({ 

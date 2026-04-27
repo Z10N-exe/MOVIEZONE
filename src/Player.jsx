@@ -45,8 +45,7 @@ export default function Player() {
   const searchParams = new URLSearchParams(location.search);
   const seasonParam = parseInt(searchParams.get('season')) || 0;
   const episodeParam = parseInt(searchParams.get('episode')) || 0;
-  // if season is 0 but episode > 0, it's likely a series with missing season — default to 1
-  const effectiveSeason = (seasonParam === 0 && episodeParam > 0) ? 1 : seasonParam;
+  const effectiveSeason = seasonParam;
   const effectiveEpisode = episodeParam;
 
   // Fetch sources — validate they exist, then build quality options
