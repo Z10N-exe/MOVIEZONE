@@ -1,273 +1,219 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Play, Plus, ArrowLeft, Star, Download } from 'lucide-react';
+import { Play, Plus, ArrowLeft, Star, Download, Check } from 'lucide-react';
 import { useAppContext } from './AppContext';
-import { tmdbApi, getImageUrl, fetchSources, fetchInfo, slugify, fetchSearch } from './api';
+import { getImageUrl, fetchSources, fetchInfo, resolveMovieBoxId } from './api';
 
 const MovieDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, addDownload } = useAppContext();
+  const { addDownload, addToMyList, removeFromMyList, isInMyList } = useAppContext();
   const [movie, setMovie] = useState(null);
   const [sources, setSources] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [selectedSeason, setSelectedSeason] = useState(1);
   const [selectedEpisode, setSelectedEpisode] = useState(1);
   const [seasonsData, setSeasonsData] = useState([]);
-  const [targetId, setTargetId] = useState(null);
+  const [movieboxId, setMovieboxId] = useState(null);
   const location = useLocation();
 
+  // Step 1: resolve whatever id we got → MovieBox id
   useEffect(() => {
-    const resolveId = async () => {
-      let resolvedId = id;
-      if (!/^\d+$/.test(id)) {
-         const searchRes = await fetchSearch(id.replace(/-/g, ' '));
-         if (searchRes && searchRes.length > 0) resolvedId = searchRes[0].id;
-      }
-      setTargetId(resolvedId);
-    };
-    resolveId();
+    if (!id) return;
+    setLoading(true); setError(null); setMovie(null); setMovieboxId(null);
+
+    // Pull title hint from query param ?t=Title+Name (set by Home/Explore when navigating)
+    const params = new URLSearchParams(location.search);
+    const titleHint = params.get('t') || '';
+
+    resolveMovieBoxId(id, titleHint).then(mbId => {
+      if (mbId) setMovieboxId(mbId);
+      else { setError('Title not found.'); setLoading(false); }
+    }).catch(() => { setError('Title not found.'); setLoading(false); });
   }, [id]);
 
+  // Step 2: fetch info from MovieBox using the resolved id
   useEffect(() => {
-    if (!targetId) return;
+    if (!movieboxId) return;
+    setLoading(true);
 
-    const fetchMovieData = async () => {
-      try {
-        setLoading(true);
-        const infoRes = await fetchInfo(targetId);
-        
-        if (infoRes && infoRes.subject) {
-          setMovie(infoRes.subject);
-          document.title = `${infoRes.subject.title || infoRes.subject.name} - MovieZone`;
-          
-          if (infoRes.resource?.seasons) {
-            setSeasonsData(infoRes.resource.seasons);
-            setSelectedSeason(infoRes.resource.seasons[0].se);
-            setSelectedEpisode(1);
-            
-            // Branding: Append ?series if not present
-            if (!location.search.toLowerCase().includes('series')) {
-               navigate(`${location.pathname}?series`, { replace: true });
-            }
-          }
-        } else {
-          const trendRes = await tmdbApi.getTrending();
-          const found = trendRes.find(m => m.id.toString() === targetId) || trendRes[0];
-          setMovie(found);
-          if (found) document.title = `${found.title || found.name} - MovieZone`;
+    fetchInfo(movieboxId).then(infoRes => {
+      if (infoRes?.subject) {
+        setMovie(infoRes.subject);
+        document.title = `${infoRes.subject.title || infoRes.subject.name} - MovieZone`;
+        if (infoRes.resource?.seasons?.length) {
+          setSeasonsData(infoRes.resource.seasons);
+          setSelectedSeason(infoRes.resource.seasons[0].se);
+          setSelectedEpisode(1);
         }
-      } catch(err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
+      } else {
+        setError('Could not load movie details.');
       }
-    };
-    fetchMovieData();
-  }, [targetId]);
+    }).catch(() => setError('Failed to load details.'))
+      .finally(() => setLoading(false));
+  }, [movieboxId]);
 
+  // Step 3: fetch sources whenever season/episode changes
   useEffect(() => {
-    if (!targetId || !movie) return;
-    
-    const fetchEpisodeSources = async () => {
-       const isSeries = movie.subjectType === 2;
-       const sourcesRes = await fetchSources(targetId, isSeries ? selectedSeason : 0, isSeries ? selectedEpisode : 0);
-       setSources(sourcesRes || []);
-    };
-    fetchEpisodeSources();
-  }, [targetId, movie, selectedSeason, selectedEpisode]);
+    if (!movieboxId || !movie) return;
+    const isSeries = movie.subjectType === 2;
+    fetchSources(movieboxId, isSeries ? selectedSeason : 0, isSeries ? selectedEpisode : 0)
+      .then(res => setSources(res || []))
+      .catch(() => setSources([]));
+  }, [movieboxId, movie, selectedSeason, selectedEpisode]);
 
-  if (loading) return <div style={{ color: 'white', padding: '40px', textAlign: 'center' }}>Loading...</div>;
-  if (!movie) return <div style={{ color: 'white', padding: '40px', textAlign: 'center' }}>Movie not found</div>;
+  const isSeries = movie?.subjectType === 2;
+  const inList = movie && isInMyList(movieboxId);
+
+  const handlePlay = () => {
+    const base = `/player/${movieboxId}`;
+    navigate(isSeries ? `${base}?season=${selectedSeason}&episode=${selectedEpisode}` : base);
+  };
+
+  const handleDownload = () => {
+    if (!sources.length) { alert('No download links found for this title'); return; }
+    const best = sources.reduce((a, b) => (Number(b.quality) > Number(a.quality) ? b : a), sources[0]);
+    addDownload({
+      id: movieboxId,
+      title: movie.title || movie.name,
+      imgUrl: getImageUrl(movie.thumbnail || movie.cover?.url),
+      size: best.size || '',
+      season: isSeries ? selectedSeason : null,
+      episode: isSeries ? selectedEpisode : null,
+    });
+    const a = document.createElement('a');
+    a.href = best.downloadUrl; a.download = '';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+
+  const handleMyList = () => {
+    if (!movieboxId) return;
+    if (inList) removeFromMyList(movieboxId);
+    else addToMyList({ id: movieboxId, title: movie.title || movie.name, imgUrl: getImageUrl(movie.thumbnail || movie.cover?.url) });
+  };
+
+  if (loading) return (
+    <div style={{ color: 'white', padding: '40px', textAlign: 'center', background: '#0f0f0f', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div>
+        <div className="spinner" style={{ margin: '0 auto 16px' }} />
+        <p style={{ color: '#aaa' }}>Loading...</p>
+      </div>
+    </div>
+  );
+
+  if (error || !movie) return (
+    <div style={{ color: 'white', padding: '40px', textAlign: 'center', background: '#0f0f0f', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+      <p style={{ color: '#ff4444' }}>{error || 'Movie not found'}</p>
+      <button onClick={() => navigate(-1)} style={{ padding: '10px 24px', borderRadius: 8, background: 'var(--primary-red)', border: 'none', color: '#fff', cursor: 'pointer' }}>Go Back</button>
+    </div>
+  );
+
+  const backdropUrl = getImageUrl(movie.stills?.url || movie.thumbnail || movie.cover?.url);
 
   return (
-    <div className="movie-details-page" style={{ color: 'white', paddingBottom: '80px', minHeight: '100vh', background: '#0f0f0f' }}>
-      <div 
-        className="backdrop" 
-        style={{ 
-          height: '50vh', 
-          backgroundImage: `url(${getImageUrl(movie.stills?.url || movie.thumbnail || movie.cover?.url || movie.backdrop_path)})`, 
-          backgroundSize: 'cover', 
-          backgroundPosition: 'center',
-          position: 'relative',
-          backgroundColor: '#1a1a1a'
-        }}
-      >
+    <div style={{ color: 'white', paddingBottom: '80px', minHeight: '100vh', background: '#0f0f0f' }}>
+      {/* Backdrop */}
+      <div style={{ height: '50vh', backgroundImage: `url(${backdropUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', position: 'relative', backgroundColor: '#1a1a1a' }}>
         {movie.trailer?.url && (
-          <video 
-            src={movie.trailer.url} 
-            autoPlay 
-            muted 
-            loop 
-            playsInline
-            style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }}
-          />
+          <video src={movie.trailer.url} autoPlay muted loop playsInline
+            style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }} />
         )}
         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, padding: '20px', background: 'linear-gradient(to bottom, rgba(0,0,0,0.8), transparent)' }}>
-            <div 
-              style={{ background: 'rgba(0,0,0,0.5)', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backdropFilter: 'blur(5px)' }}
-              onClick={() => navigate(-1)}
-            >
-              <ArrowLeft color="white" size={24} />
-            </div>
-        </div>
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '70%', background: 'linear-gradient(to top, #0f0f0f 10%, transparent)' }}></div>
-      </div>
-      
-      <div className="details-content" style={{ padding: '0 20px', marginTop: '-60px', position: 'relative', zIndex: 10 }}>
-        <h1 style={{ fontSize: '2.2rem', marginBottom: '10px', fontWeight: '800', textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>{movie.title || movie.name}</h1>
-        
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px', color: '#aaa', marginBottom: '20px', fontSize: '0.9rem' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#ffb400', fontWeight: 'bold' }}>
-            <Star size={16} fill="#ffb400" /> {(movie.score || movie.vote_average || 0).toFixed(1)}
-          </span>
-          <span>{movie.year || movie.release_date?.split('-')[0] || (movie.releaseDate ? new Date(movie.releaseDate).getFullYear() : '')}</span>
-          {(movie.high_quality || movie.quality === '4k') && (
-            <span style={{ background: 'var(--primary-red)', padding: '3px 8px', borderRadius: '4px', fontSize: '0.8rem', color: 'white', fontWeight: 'bold' }}>4K HDR</span>
-          )}
-          <span>{movie.duration || (movie.runtime ? `${Math.floor(movie.runtime / 60)}h ${movie.runtime % 60}m` : '')}</span>
-        </div>
-
-        <div style={{ display: 'flex', gap: '15px', marginBottom: '25px' }}>
-          <button 
-            onClick={() => {
-              const base = `/player/${targetId}`;
-              const isSeries = movie.subjectType === 2;
-              if (isSeries) {
-                navigate(`${base}?season=${selectedSeason}&episode=${selectedEpisode}`);
-              } else {
-                navigate(base);
-              }
-            }}
-            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', background: 'white', color: 'black', padding: '14px', borderRadius: '30px', border: 'none', fontWeight: 'bold', fontSize: '1.1rem', cursor: 'pointer', boxShadow: '0 4px 15px rgba(255,255,255,0.2)' }}
-          >
-            <Play size={20} fill="black" /> {movie.subjectType === 2 ? `Play S${selectedSeason} E${selectedEpisode}` : 'Play'}
-          </button>
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button 
-              onClick={() => {
-                if (sources.length > 0) {
-                  const isSeries = movie.subjectType === 2;
-                  // Pick best quality available (highest resolution)
-                  const best = sources.reduce((a, b) => (Number(b.quality) > Number(a.quality) ? b : a), sources[0]);
-                  addDownload({ 
-                    id: targetId, 
-                    title: movie.title || movie.name, 
-                    imgUrl: getImageUrl(movie.poster_path || movie.thumbnail),
-                    size: best.size || '',
-                    season: isSeries ? selectedSeason : null,
-                    episode: isSeries ? selectedEpisode : null
-                  });
-                  const a = document.createElement('a');
-                  a.href = best.downloadUrl;
-                  a.download = '';
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                } else {
-                  alert('No download links found for this title');
-                }
-              }}
-              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#222', color: 'white', width: '50px', borderRadius: '15px', border: 'none', cursor: 'pointer' }}>
-              <Download size={20} />
-            </button>
-            <button style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#222', color: 'white', width: '50px', borderRadius: '15px', border: 'none', cursor: 'pointer' }}>
-              <Plus size={20} />
-            </button>
+          <div onClick={() => navigate(-1)}
+            style={{ background: 'rgba(0,0,0,0.5)', width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', backdropFilter: 'blur(5px)' }}>
+            <ArrowLeft color="white" size={24} />
           </div>
         </div>
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '70%', background: 'linear-gradient(to top, #0f0f0f 10%, transparent)' }} />
+      </div>
 
-        <p style={{ lineHeight: '1.6', color: '#ccc', fontSize: '0.95rem', marginBottom: '30px' }}>{movie.introduction || movie.overview || movie.description}</p>
-        
-        {/* Series Section */}
+      <div style={{ padding: '0 20px', marginTop: '-60px', position: 'relative', zIndex: 10 }}>
+        <h1 style={{ fontSize: '2rem', marginBottom: 10, fontWeight: 800, textShadow: '0 2px 4px rgba(0,0,0,0.5)' }}>
+          {movie.title || movie.name}
+        </h1>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, color: '#aaa', marginBottom: 20, fontSize: '0.9rem', flexWrap: 'wrap' }}>
+          {(movie.score > 0) && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#ffb400', fontWeight: 'bold' }}>
+              <Star size={14} fill="#ffb400" /> {Number(movie.score).toFixed(1)}
+            </span>
+          )}
+          {(movie.year || movie.releaseDate) && (
+            <span>{movie.year || new Date(movie.releaseDate).getFullYear()}</span>
+          )}
+          {movie.duration && <span>{movie.duration}</span>}
+          {isSeries && <span style={{ background: '#333', padding: '2px 8px', borderRadius: 4, fontSize: 11 }}>Series</span>}
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 24 }}>
+          <button onClick={handlePlay}
+            style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: 'white', color: 'black', padding: '13px', borderRadius: 30, border: 'none', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer' }}>
+            <Play size={18} fill="black" />
+            {isSeries ? `Play S${selectedSeason} E${selectedEpisode}` : 'Play'}
+          </button>
+          <button onClick={handleDownload}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#222', color: 'white', width: 50, borderRadius: 15, border: 'none', cursor: 'pointer' }}>
+            <Download size={20} />
+          </button>
+          <button onClick={handleMyList}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: inList ? '#1db954' : '#222', color: 'white', width: 50, borderRadius: 15, border: 'none', cursor: 'pointer' }}>
+            {inList ? <Check size={20} /> : <Plus size={20} />}
+          </button>
+        </div>
+
+        <p style={{ lineHeight: 1.6, color: '#ccc', fontSize: '0.95rem', marginBottom: 28 }}>
+          {movie.introduction || movie.overview || movie.description}
+        </p>
+
+        {/* Series episodes */}
         {seasonsData.length > 0 && (
-          <div style={{ marginBottom: '30px' }}>
-             <h3 style={{ marginBottom: '15px', fontSize: '1.2rem' }}>Episodes</h3>
-             
-             {/* Season Selector */}
-             {seasonsData.length > 1 && (
-               <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '15px', marginBottom: '15px', scrollbarWidth: 'none' }}>
-                 {seasonsData.map(s => (
-                   <button 
-                    key={s.se}
-                    onClick={() => {
-                      setSelectedSeason(s.se);
-                      setSelectedEpisode(1);
-                    }}
-                    style={{ 
-                      padding: '8px 20px', 
-                      borderRadius: '20px', 
-                      border: 'none', 
-                      backgroundColor: selectedSeason === s.se ? 'var(--primary-red)' : '#222',
-                      color: 'white',
-                      fontWeight: 'bold',
-                      whiteSpace: 'nowrap',
-                      cursor: 'pointer'
-                    }}
-                   >
-                     Season {s.se}
-                   </button>
-                 ))}
-               </div>
-             )}
-
-             {/* Episode Grid */}
-             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))', gap: '10px' }}>
-                {Array.from({ length: (seasonsData.find(s => s.se === selectedSeason)?.maxEp || 0) }, (_, i) => i + 1).map(ep => (
-                  <button 
-                    key={ep}
-                    onClick={() => setSelectedEpisode(ep)}
-                    style={{ 
-                      height: '60px', 
-                      borderRadius: '12px', 
-                      border: 'none', 
-                      backgroundColor: selectedEpisode === ep ? 'var(--primary-red)' : '#222',
-                      color: 'white',
-                      fontWeight: 'bold',
-                      fontSize: '1.1rem',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    {ep}
+          <div style={{ marginBottom: 28 }}>
+            <h3 style={{ marginBottom: 14, fontSize: '1.1rem' }}>Episodes</h3>
+            {seasonsData.length > 1 && (
+              <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 12, marginBottom: 12, scrollbarWidth: 'none' }}>
+                {seasonsData.map(s => (
+                  <button key={s.se} onClick={() => { setSelectedSeason(s.se); setSelectedEpisode(1); }}
+                    style={{ padding: '7px 18px', borderRadius: 20, border: 'none', backgroundColor: selectedSeason === s.se ? 'var(--primary-red)' : '#222', color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                    Season {s.se}
                   </button>
                 ))}
-             </div>
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(58px, 1fr))', gap: 8 }}>
+              {Array.from({ length: seasonsData.find(s => s.se === selectedSeason)?.maxEp || 0 }, (_, i) => i + 1).map(ep => (
+                <button key={ep} onClick={() => setSelectedEpisode(ep)}
+                  style={{ height: 58, borderRadius: 12, border: 'none', backgroundColor: selectedEpisode === ep ? 'var(--primary-red)' : '#222', color: 'white', fontWeight: 'bold', fontSize: '1rem', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {ep}
+                </button>
+              ))}
+            </div>
           </div>
         )}
-        
-        <div style={{ marginTop: '30px' }}>
-           <h3 style={{ marginBottom: '15px', fontSize: '1.2rem' }}>Cast</h3>
-           <div style={{ display: 'flex', gap: '15px', overflowX: 'auto', paddingBottom: '10px', scrollbarWidth: 'none' }}>
-             {movie.starring ? movie.starring.split(',').map((name, idx) => (
-                <div key={idx} style={{ textAlign: 'center', minWidth: '80px' }}>
-                  <div style={{ 
-                    width: '70px', 
-                    height: '70px', 
-                    borderRadius: '50%', 
-                    background: 'var(--surface-color-light)', 
-                    marginBottom: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1.5rem',
-                    fontWeight: 'bold',
-                    color: 'var(--primary-red)',
-                    margin: '0 auto'
-                  }}>
+
+        {/* Cast */}
+        {movie.starring && (
+          <div style={{ marginTop: 24 }}>
+            <h3 style={{ marginBottom: 14, fontSize: '1.1rem' }}>Cast</h3>
+            <div style={{ display: 'flex', gap: 14, overflowX: 'auto', paddingBottom: 8, scrollbarWidth: 'none' }}>
+              {movie.starring.split(',').map((name, idx) => (
+                <div key={idx} style={{ textAlign: 'center', minWidth: 72 }}>
+                  <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#222', marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', fontWeight: 'bold', color: 'var(--primary-red)', margin: '0 auto' }}>
                     {name.trim().charAt(0)}
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: '#aaa', marginTop: 4 }}>{name.trim()}</div>
+                  <div style={{ fontSize: '0.75rem', color: '#aaa', marginTop: 4 }}>{name.trim()}</div>
                 </div>
-             )) : (
-               <p style={{ color: '#666', fontSize: '0.9rem' }}>Cast information unavailable</p>
-             )}
-           </div>
-        </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      <style>{`
+        .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,0.15); border-top-color: var(--primary-red, #e50914); border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 };

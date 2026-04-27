@@ -12,7 +12,7 @@ const MasonryCard = ({ movie, index }) => {
 
   return (
     <div
-      onClick={() => navigate(`/movie/${movie.id}`)}
+      onClick={() => navigate(`/movie/${movie.id}?t=${encodeURIComponent(movie.title || movie.name || '')}`)}
       className="masonry-card"
       style={{ cursor: 'pointer' }}
     >

@@ -6,6 +6,38 @@ export const getImageUrl = (path, size = 'w342') => {
     return `https://image.tmdb.org/t/p/${size}${path}`;
 };
 
+// Resolve any id to a MovieBox id (18-digit).
+// - Already a MovieBox id → return as-is
+// - Short numeric (TMDB) → call /api/tmdb-resolve/:id
+// - Slug → search by title
+export const resolveMovieBoxId = async (id, titleHint = '') => {
+    if (!id) return null;
+    const s = String(id);
+    // MovieBox IDs are 15+ digits
+    if (/^\d{15,}$/.test(s)) return s;
+
+    // Short numeric = TMDB id
+    if (/^\d+$/.test(s)) {
+        try {
+            const r = await fetch(`${API_URL}/tmdb-resolve/${s}`);
+            const j = await r.json();
+            if (j.data?.movieboxId) return String(j.data.movieboxId);
+        } catch {}
+        // If tmdb-resolve fails, try searching by title hint
+        if (titleHint) {
+            const res = await fetchSearch(titleHint);
+            if (res?.length) return String(res[0].id);
+        }
+        return null;
+    }
+
+    // Slug / title string
+    const query = s.replace(/-/g, ' ');
+    const res = await fetchSearch(query);
+    if (res?.length) return String(res[0].id);
+    return null;
+};
+
 export const fetchTrending = async () => {
     try {
         const response = await fetch(`${API_URL}/trending`);
