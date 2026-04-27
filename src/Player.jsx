@@ -71,7 +71,8 @@ export default function Player() {
           // No sources — check if it's a series that needs episode selection
           const info = await fetchInfo(targetId);
           const isSeries = info?.subject?.subjectType === 2 || info?.resource?.seasons?.length > 0;
-          if (isSeries || (effectiveSeason === 0 && effectiveEpisode === 0)) {
+          if (isSeries && effectiveSeason === 0 && effectiveEpisode === 0) {
+            // Series with no episode selected — go back to info to pick one
             navigate(`/movie/${targetId}`, { replace: true });
             return;
           }

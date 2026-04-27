@@ -171,10 +171,26 @@ async function handleSources(movieId, url, request) {
     if (!detailPath) return json({ status: 'success', data: { downloads: [], processedSources: [] } });
 
     const dlParams = `subjectId=${movieId}${season ? `&se=${season}&ep=${episode}` : ''}`;
-    const dlR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/download?${dlParams}`, {
-        headers: { 'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`, 'Origin': 'https://fmoviesunblocked.net' }
-    });
-    const dlData = processResponse(await dlR.json());
+
+    // Try multiple mirrors — some work better for movies vs series
+    const mirrors = ['h5.aoneroom.com', 'moviebox.pk', 'moviebox.ph', 'moviebox.id'];
+    let dlData = null;
+    for (const mirror of mirrors) {
+        try {
+            const mirrorUrl = `https://${mirror}`;
+            const dlR = await fetch(`${mirrorUrl}/wefeed-h5-bff/web/subject/download?${dlParams}`, {
+                headers: {
+                    ...DEFAULT_HEADERS,
+                    'Host': mirror,
+                    'Referer': `https://fmoviesunblocked.net/spa/videoPlayPage/movies/${detailPath}`,
+                    'Origin': 'https://fmoviesunblocked.net',
+                }
+            });
+            const parsed = processResponse(await dlR.json());
+            if (parsed?.downloads?.length) { dlData = parsed; break; }
+        } catch {}
+    }
+
     if (!dlData?.downloads?.length) return json({ status: 'success', data: { downloads: [], processedSources: [] } });
 
     const title = info?.subject?.title || 'video';
