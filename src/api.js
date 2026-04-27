@@ -7,27 +7,30 @@ export const getImageUrl = (path, size = 'w342') => {
 };
 
 // Resolve any id to a MovieBox id (18-digit).
-// - Already a MovieBox id → return as-is
-// - Short numeric (TMDB) → call /api/tmdb-resolve/:id
-// - Slug → search by title
+// - Already a MovieBox id (15+ digits) → return as-is
+// - Has a titleHint → search MovieBox by title directly (fastest path)
+// - Short numeric with no hint → try /api/tmdb-resolve/:id
+// - Slug → search by slug-converted title
 export const resolveMovieBoxId = async (id, titleHint = '') => {
     if (!id) return null;
     const s = String(id);
-    // MovieBox IDs are 15+ digits
+
+    // Already a MovieBox id (15+ digits)
     if (/^\d{15,}$/.test(s)) return s;
 
-    // Short numeric = TMDB id
+    // If we have a title hint, search MovieBox directly — fastest and most reliable
+    if (titleHint && titleHint.trim()) {
+        const res = await fetchSearch(titleHint.trim());
+        if (res?.length) return String(res[0].id);
+    }
+
+    // Short numeric = TMDB id, no title hint — try tmdb-resolve endpoint
     if (/^\d+$/.test(s)) {
         try {
             const r = await fetch(`${API_URL}/tmdb-resolve/${s}`);
             const j = await r.json();
             if (j.data?.movieboxId) return String(j.data.movieboxId);
         } catch {}
-        // If tmdb-resolve fails, try searching by title hint
-        if (titleHint) {
-            const res = await fetchSearch(titleHint);
-            if (res?.length) return String(res[0].id);
-        }
         return null;
     }
 
@@ -82,11 +85,12 @@ export const fetchGenre = async (genre) => {
     }
 };
 
-export const fetchSources = async (movieId, season = 0, episode = 0) => {
+export const fetchSources = async (movieId, season = 0, episode = 0, titleHint = '') => {
     try {
         const url = new URL(`${API_URL}/sources/${movieId}`);
         if (season) url.searchParams.append('season', season);
         if (episode) url.searchParams.append('episode', episode);
+        if (titleHint) url.searchParams.append('t', titleHint);
 
         const response = await fetch(url);
         const json = await response.json();
@@ -97,9 +101,11 @@ export const fetchSources = async (movieId, season = 0, episode = 0) => {
     }
 };
 
-export const fetchInfo = async (movieId) => {
+export const fetchInfo = async (movieId, titleHint = '') => {
     try {
-        const response = await fetch(`${API_URL}/info/${movieId}`);
+        const url = new URL(`${API_URL}/info/${movieId}`);
+        if (titleHint) url.searchParams.append('t', titleHint);
+        const response = await fetch(url);
         const json = await response.json();
         return json.data || null;
     } catch (e) {

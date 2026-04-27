@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Play, Plus, ArrowLeft, Star, Download, Check } from 'lucide-react';
 import { useAppContext } from './AppContext';
-import { getImageUrl, fetchSources, fetchInfo, resolveMovieBoxId } from './api';
+import { getImageUrl, fetchSources, fetchInfo } from './api';
 
 const MovieDetails = () => {
   const { id } = useParams();
@@ -18,28 +18,19 @@ const MovieDetails = () => {
   const [movieboxId, setMovieboxId] = useState(null);
   const location = useLocation();
 
-  // Step 1: resolve whatever id we got → MovieBox id
+  // Step 1: get title hint from URL param
+  const titleHint = new URLSearchParams(location.search).get('t') || '';
+
+  // Step 2: fetch info — pass id + title hint, worker resolves to MovieBox id server-side
   useEffect(() => {
     if (!id) return;
     setLoading(true); setError(null); setMovie(null); setMovieboxId(null);
 
-    // Pull title hint from query param ?t=Title+Name (set by Home/Explore when navigating)
-    const params = new URLSearchParams(location.search);
-    const titleHint = params.get('t') || '';
-
-    resolveMovieBoxId(id, titleHint).then(mbId => {
-      if (mbId) setMovieboxId(mbId);
-      else { setError('Title not found.'); setLoading(false); }
-    }).catch(() => { setError('Title not found.'); setLoading(false); });
-  }, [id]);
-
-  // Step 2: fetch info from MovieBox using the resolved id
-  useEffect(() => {
-    if (!movieboxId) return;
-    setLoading(true);
-
-    fetchInfo(movieboxId).then(infoRes => {
+    fetchInfo(id, titleHint).then(infoRes => {
       if (infoRes?.subject) {
+        // Worker returns the resolved movieboxId on the subject
+        const mbId = infoRes.subject.movieboxId || id;
+        setMovieboxId(mbId);
         setMovie(infoRes.subject);
         document.title = `${infoRes.subject.title || infoRes.subject.name} - MovieZone`;
         if (infoRes.resource?.seasons?.length) {
@@ -52,13 +43,13 @@ const MovieDetails = () => {
       }
     }).catch(() => setError('Failed to load details.'))
       .finally(() => setLoading(false));
-  }, [movieboxId]);
+  }, [id]);
 
   // Step 3: fetch sources whenever season/episode changes
   useEffect(() => {
     if (!movieboxId || !movie) return;
     const isSeries = movie.subjectType === 2;
-    fetchSources(movieboxId, isSeries ? selectedSeason : 0, isSeries ? selectedEpisode : 0)
+    fetchSources(movieboxId, isSeries ? selectedSeason : 0, isSeries ? selectedEpisode : 0, titleHint)
       .then(res => setSources(res || []))
       .catch(() => setSources([]));
   }, [movieboxId, movie, selectedSeason, selectedEpisode]);

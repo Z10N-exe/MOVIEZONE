@@ -270,10 +270,31 @@ async function handleTmdbResolve(tmdbId, tmdbKey) {
     return json({ status: 'success', data: { movieboxId: String(movieboxId), title, mediaType } });
 }
 
-async function handleInfo(movieId) {
-    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${movieId}`);
+async function handleInfo(movieId, url) {
+    // If movieId looks like a short TMDB id, try to resolve via title param first
+    const u = new URL(url);
+    const titleHint = u.searchParams.get('t') || '';
+
+    let mbId = movieId;
+    if (!/^\d{15,}$/.test(movieId) && titleHint) {
+        // Search MovieBox by title to get the real id
+        try {
+            const sr = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword: titleHint, page: 1, perPage: 5, subjectType: 0 }),
+            });
+            const sd = processResponse(await sr.json());
+            const best = sd?.items?.[0];
+            if (best) mbId = String(best.subjectId || best.id);
+        } catch {}
+    }
+
+    const r = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${mbId}`);
     const data = processResponse(await r.json());
     if (data.subject?.cover?.url) data.subject.thumbnail = data.subject.cover.url;
+    // Return the resolved moviebox id so the client can use it for sources
+    if (data.subject) data.subject.movieboxId = mbId;
     return json({ status: 'success', data });
 }
 
@@ -287,13 +308,29 @@ async function handleSources(movieId, url, request) {
     const u = new URL(url);
     const season = u.searchParams.get('season') || 0;
     const episode = u.searchParams.get('episode') || 0;
+    const titleHint = u.searchParams.get('t') || '';
 
-    const infoR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${movieId}`);
+    // Resolve short/TMDB ids to MovieBox ids via title search
+    let mbId = movieId;
+    if (!/^\d{15,}$/.test(movieId) && titleHint) {
+        try {
+            const sr = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/search`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ keyword: titleHint, page: 1, perPage: 5, subjectType: 0 }),
+            });
+            const sd = processResponse(await sr.json());
+            const best = sd?.items?.[0];
+            if (best) mbId = String(best.subjectId || best.id);
+        } catch {}
+    }
+
+    const infoR = await apiRequest(`${HOST_URL}/wefeed-h5-bff/web/subject/detail?subjectId=${mbId}`);
     const info = processResponse(await infoR.json());
     const detailPath = info?.subject?.detailPath;
     if (!detailPath) return json({ status: 'success', data: { downloads: [], processedSources: [] } });
 
-    const dlParams = `subjectId=${movieId}${season ? `&se=${season}&ep=${episode}` : ''}`;
+    const dlParams = `subjectId=${mbId}${season ? `&se=${season}&ep=${episode}` : ''}`;
 
     // Try multiple mirrors — some work better for movies vs series
     const mirrors = ['h5.aoneroom.com', 'moviebox.pk', 'moviebox.ph', 'moviebox.id'];
@@ -540,7 +577,7 @@ export default {
                 const genre = decodeURIComponent(path.split('/api/genre/')[1]);
                 return handleGenre(genre, request.url, kv, tmdbKey);
             }
-            if (path.startsWith('/api/info/')) return handleInfo(path.split('/api/info/')[1]);
+            if (path.startsWith('/api/info/')) return handleInfo(path.split('/api/info/')[1], request.url);
             if (path.startsWith('/api/tmdb-resolve/')) return handleTmdbResolve(path.split('/api/tmdb-resolve/')[1], tmdbKey);
             if (path.startsWith('/api/sources/')) return handleSources(path.split('/api/sources/')[1], request.url, request);
             if (path === '/api/stream') return handleStream(request.url, request);
