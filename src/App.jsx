@@ -57,14 +57,14 @@ const SplashScreen = ({ onFinish }) => {
 
   return (
     <div className="splash-container">
-      <img src="{logoSrc}" className="splash-logo" alt="MovieZone" />
+      <img src={logoSrc} className="splash-logo" alt="MovieZone" />
     </div>
   );
 };
 
 const MaintenanceScreen = ({ siteName }) => (
   <div style={{ position: 'fixed', inset: 0, backgroundColor: '#000', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '20px', textAlign: 'center' }}>
-    <img src="{logoSrc}" style={{ width: '80px', height: '80px', marginBottom: '24px' }} alt="Logo" />
+    <img src={logoSrc} style={{ width: '80px', height: '80px', marginBottom: '24px' }} alt="Logo" />
     <h1 style={{ fontSize: '32px', fontWeight: 'bold', color: 'var(--primary-red)', marginBottom: '16px' }}>{siteName} Technical Update</h1>
     <p style={{ color: '#aaa', fontSize: '18px', maxWidth: '400px', lineHeight: '1.6' }}>
       We are currently performing scheduled maintenance to improve your cinematic experience.
