@@ -4,7 +4,11 @@ const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
     const [user, setUser] = useState(() => {
-        try { return JSON.parse(localStorage.getItem('user')); } catch { return null; }
+        try {
+            return JSON.parse(localStorage.getItem('user')) || { name: 'Guest', email: '', role: 'user' };
+        } catch {
+            return { name: 'Guest', email: '', role: 'user' };
+        }
     });
     const [favorites, setFavorites] = useState([]);
     const [myList, setMyList] = useState(() => {
