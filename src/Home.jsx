@@ -1,15 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, Search, Plus, Check, Info } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAppContext } from './AppContext';
-import { fetchTrending, fetchAds, getImageUrl, fetchGenre, fetchSearch } from './api';
-
-const GENRE_ROWS = [
-  'Action', 'Comedy', 'Drama', 'Thriller', 'Horror',
-  'Sci-Fi', 'Romance', 'Adventure', 'Animation', 'Crime',
-  'Documentary', 'Fantasy', 'Mystery', 'Biography', 'Anime',
-  'History', 'Music', 'Sport', 'War', 'Western',
-];
+import { fetchHomepage, fetchAds, getImageUrl } from './api';
 
 const Row = ({ title, movies, onMovieClick }) => {
   if (!movies?.length) return null;
@@ -21,7 +14,7 @@ const Row = ({ title, movies, onMovieClick }) => {
           <div key={movie.id} onClick={() => onMovieClick(movie)}
             style={{ flexShrink: 0, width: 110, cursor: 'pointer', position: 'relative', borderRadius: 6, overflow: 'hidden' }}>
             <img
-              src={getImageUrl(movie.thumbnail || movie.cover?.url)}
+              src={getImageUrl(movie.thumbnail)}
               loading="lazy"
               alt={movie.title}
               style={{ width: '100%', aspectRatio: '2/3', objectFit: 'cover', display: 'block', background: '#1a1a1a' }}
@@ -43,73 +36,23 @@ export default function Home() {
   const navigate = useNavigate();
   const { addToMyList, removeFromMyList, isInMyList, isPremium } = useAppContext();
   const [trending, setTrending] = useState([]);
-  const [genreData, setGenreData] = useState({});
-  const [popularMovies, setPopularMovies] = useState([]);
-  const [popularSeries, setPopularSeries] = useState([]);
+  const [sections, setSections] = useState([]);
   const [ads, setAds] = useState([]);
   const [heroIndex, setHeroIndex] = useState(0);
   const [listAdded, setListAdded] = useState(false);
 
-  // Well-known recent titles to search for
-  const POPULAR_MOVIE_TITLES = [
-    'Deadpool Wolverine', 'Inside Out 2', 'Dune Part Two', 'Oppenheimer',
-    'Aquaman', 'The Marvels', 'Fast X', 'Mission Impossible',
-    'John Wick 4', 'Guardians Galaxy', 'Ant-Man', 'Black Panther',
-    'Avatar Way of Water', 'Top Gun Maverick', 'Spider-Man No Way Home',
-  ];
-  const POPULAR_SERIES_TITLES = [
-    'The Last of Us', 'House of Dragon', 'Wednesday', 'Stranger Things',
-    'The Bear', 'Succession', 'Squid Game', 'Euphoria',
-    'Yellowstone', 'Andor', 'Loki', 'The Witcher',
-  ];
-
   useEffect(() => {
-    fetchTrending().then(data => { if (data?.length) setTrending(data); });
+    fetchHomepage().then(({ sections: secs, trending: tr }) => {
+      if (tr?.length) setTrending(tr);
+      if (secs?.length) setSections(secs);
+    });
+
     if (!isPremium) {
       fetchAds().then(res => {
         if (res?.status === 'success') setAds(res.data.filter(a => a.type === 'banner' && a.placement === 'homepage'));
       });
     }
-
-    // Fetch popular movies by searching known titles
-    const fetchPopular = async (titles, setter) => {
-      const results = [];
-      const seen = new Set();
-      for (const title of titles) {
-        try {
-          const items = await fetchSearch(title);
-          if (items?.length) {
-            const first = items[0];
-            if (!seen.has(first.id)) { seen.add(first.id); results.push(first); }
-          }
-        } catch {}
-        if (results.length >= 12) break;
-      }
-      if (results.length) setter(results);
-    };
-
-    fetchPopular(POPULAR_MOVIE_TITLES, setPopularMovies);
-    setTimeout(() => fetchPopular(POPULAR_SERIES_TITLES, setPopularSeries), 1000);
-
-    // Fetch first 8 genre rows immediately
-    GENRE_ROWS.slice(0, 8).forEach(genre => {
-      fetchGenre(genre).then(movies => {
-        if (movies?.length) setGenreData(prev => ({ ...prev, [genre]: movies }));
-      });
-    });
   }, [isPremium]);
-
-  // Lazy load remaining genres
-  useEffect(() => {
-    if (!trending.length) return;
-    GENRE_ROWS.slice(8).forEach((genre, i) => {
-      setTimeout(() => {
-        fetchGenre(genre).then(movies => {
-          if (movies?.length) setGenreData(prev => ({ ...prev, [genre]: movies }));
-        });
-      }, (i + 1) * 600);
-    });
-  }, [trending.length]);
 
   useEffect(() => {
     if (!trending.length) return;
@@ -129,14 +72,11 @@ export default function Home() {
     else { addToMyList({ id: featured.id, title: featured.title, imgUrl: getImageUrl(featured.thumbnail) }); setListAdded(true); }
   };
 
-const goToMovie = (movie) => {
+  const goToMovie = (movie) => {
     const titleParam = movie.title || movie.name || '';
     const yearParam = movie.year || '';
     navigate(`/movie/${movie.id}?t=${encodeURIComponent(titleParam)}&y=${yearParam}`);
   };
-  const tvShows = useMemo(() => trending.filter(m => m.subjectType === 2), [trending]);
-  const films = useMemo(() => trending.filter(m => m.subjectType === 1), [trending]);
-  const newReleases = useMemo(() => [...trending].sort((a, b) => new Date(b.releaseDate || 0) - new Date(a.releaseDate || 0)).slice(0, 15), [trending]);
 
   return (
     <div style={{ backgroundColor: '#141414', minHeight: '100vh', paddingBottom: 100, color: '#fff' }}>
@@ -194,8 +134,6 @@ const goToMovie = (movie) => {
 
       {/* ── Rows ── */}
       <div style={{ marginTop: -36, position: 'relative', zIndex: 10 }}>
-        <Row title="Trending Now" movies={trending.slice(0, 15)} onMovieClick={goToMovie} />
-
         {!isPremium && ads[0] && (
           <div onClick={() => window.open(ads[0].targetLink, '_blank')}
             style={{ margin: '0 20px 28px', borderRadius: 8, height: 65, backgroundImage: `url(${ads[0].imageUrl})`, backgroundSize: 'cover', cursor: 'pointer', position: 'relative', overflow: 'hidden' }}>
@@ -205,17 +143,9 @@ const goToMovie = (movie) => {
           </div>
         )}
 
-        <Row title="Popular Movies" movies={popularMovies} onMovieClick={goToMovie} />
-        <Row title="Popular Series" movies={popularSeries} onMovieClick={goToMovie} />
-        <Row title="TV Shows" movies={tvShows.slice(0, 15)} onMovieClick={goToMovie} />
-        <Row title="Movies" movies={films.slice(0, 15)} onMovieClick={goToMovie} />
-        <Row title="New Releases" movies={newReleases} onMovieClick={goToMovie} />
-
-        {GENRE_ROWS.map(genre =>
-          genreData[genre]?.length > 0 ? (
-            <Row key={genre} title={genre} movies={genreData[genre]} onMovieClick={goToMovie} />
-          ) : null
-        )}
+        {sections.map(section => (
+          <Row key={section.title} title={section.title} movies={section.movies} onMovieClick={goToMovie} />
+        ))}
       </div>
     </div>
   );

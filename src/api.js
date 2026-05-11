@@ -1,248 +1,161 @@
-const API_URL = 'https://moviezone-api.onrender.com/api';
+const API = 'https://moviezone-end.scorezone.workers.dev';
+
+const normalizeMovie = (m) => ({
+  id: String(m.subjectId || m.id || ''),
+  title: m.title || m.name || '',
+  name: m.title || m.name || '',
+  thumbnail: m.thumbnail || m.cover?.url || m.poster_url || '',
+  slug: m.slug || '',
+  badge: m.badge || '',
+  subjectType: m.subjectType || 1,
+  score: parseFloat(m.imdbRatingValue || m.score) || 0,
+  releaseDate: m.releaseDate || m.release_date || '',
+  year: m.year || (m.releaseDate ? new Date(m.releaseDate).getFullYear() : '') || (m.release_date ? new Date(m.release_date).getFullYear() : ''),
+  genre: m.genre || '',
+});
 
 export const getImageUrl = (path, size = 'w342') => {
-    if (!path) return '';
-    if (path.startsWith('http')) return path;
-    return `https://image.tmdb.org/t/p/${size}${path}`;
-};
-
-// Resolve any id to a MovieBox id (18-digit).
-// - Already a MovieBox id (15+ digits) → return as-is
-// - Has a titleHint → search MovieBox by title directly (fastest path)
-// - Short numeric with no hint → try /api/tmdb-resolve/:id
-// - Slug → search by slug-converted title
-export const resolveMovieBoxId = async (id, titleHint = '') => {
-    if (!id) return null;
-    const s = String(id);
-
-    // Already a MovieBox id (15+ digits)
-    if (/^\d{15,}$/.test(s)) return s;
-
-    // If we have a title hint, search MovieBox directly — fastest and most reliable
-    if (titleHint && titleHint.trim()) {
-        const res = await fetchSearch(titleHint.trim());
-        if (res?.length) return String(res[0].id);
-    }
-
-    // Short numeric = TMDB id, no title hint — try tmdb-resolve endpoint
-    if (/^\d+$/.test(s)) {
-        try {
-            const r = await fetch(`${API_URL}/tmdb-resolve/${s}`);
-            const j = await r.json();
-            if (j.data?.movieboxId) return String(j.data.movieboxId);
-        } catch {}
-        return null;
-    }
-
-    // Slug / title string
-    const query = s.replace(/-/g, ' ');
-    const res = await fetchSearch(query);
-    if (res?.length) return String(res[0].id);
-    return null;
-};
-
-export const fetchTrending = async () => {
-    try {
-        const response = await fetch(`${API_URL}/trending`);
-        const json = await response.json();
-        return json.data?.items || [];
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
-};
-
-export const fetchSearch = async (query) => {
-    try {
-        const response = await fetch(`${API_URL}/search/${encodeURIComponent(query)}`);
-        const json = await response.json();
-        return json.data?.items || [];
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
-};
-
-export const fetchHomepage = async () => {
-    try {
-        const response = await fetch(`${API_URL}/homepage`);
-        const json = await response.json();
-        return json.data || {};
-    } catch (e) {
-        console.error(e);
-        return {};
-    }
-};
-
-export const fetchGenre = async (genre) => {
-    try {
-        // API doesn't have genre endpoint, use search as fallback
-        const response = await fetch(`${API_URL}/search/${encodeURIComponent(genre)}`);
-        const json = await response.json();
-        return json.data?.items || [];
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
-};
-
-export const fetchSources = async (movieId, season = 0, episode = 0, titleHint = '', yearHint = '') => {
-    try {
-        const url = new URL(`${API_URL}/sources/${movieId}`);
-        if (season) url.searchParams.append('season', season);
-        if (episode) url.searchParams.append('episode', episode);
-        if (titleHint) url.searchParams.append('t', titleHint);
-        if (yearHint) url.searchParams.append('y', yearHint);
-
-        const response = await fetch(url);
-        const json = await response.json();
-        return json.data?.processedSources || [];
-    } catch (e) {
-        console.error(e);
-        return [];
-    }
-};
-
-export const fetchInfo = async (movieId, titleHint = '', yearHint = '') => {
-    try {
-        const url = new URL(`${API_URL}/info/${movieId}`);
-        if (titleHint) url.searchParams.append('t', titleHint);
-        if (yearHint) url.searchParams.append('y', yearHint);
-        const response = await fetch(url);
-        const json = await response.json();
-        return json.data || null;
-    } catch (e) {
-        console.error(e);
-        return null;
-    }
+  if (!path) return '';
+  if (path.startsWith('http')) return path;
+  return `https://image.tmdb.org/t/p/${size}${path}`;
 };
 
 export const slugify = (text) => {
-    if (!text) return 'movie';
-    return text
-        .toString()
-        .toLowerCase()
-        .trim()
-        .replace(/\s+/g, '-')     // Replace spaces with -
-        .replace(/[^\w-]+/g, '')  // Remove all non-word chars
-        .replace(/--+/g, '-');    // Replace multiple - with single -
+  if (!text) return 'movie';
+  return text.toString().toLowerCase().trim()
+    .replace(/\s+/g, '-').replace(/[^\w-]+/g, '').replace(/--+/g, '-');
 };
 
-// --- AUTH & ADMIN ---
-const getHeaders = () => ({
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${localStorage.getItem('token')}`
-});
-
-export const loginUser = async (credentials) => {
-    const res = await fetch(`${API_URL}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(credentials)
-    });
-    return res.json();
-};
-
-export const signupUser = async (data) => {
-    const res = await fetch(`${API_URL}/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-    });
+export const fetchSearch = async (query) => {
+  try {
+    const res = await fetch(`${API}/api/search/${encodeURIComponent(query)}`);
     const json = await res.json();
-    if (!res.ok && !json.status) {
-        json.status = 'error';
-        json.message = json.message || 'Signup failed. Please try again.';
+    return (json.data?.items || []).map(normalizeMovie);
+  } catch (e) { console.error(e); return []; }
+};
+
+// Returns { sections: [{title, movies}], trending: [movie] }
+export const fetchHomepage = async () => {
+  try {
+    const res = await fetch(`${API}/api/homepage`);
+    const json = await res.json();
+    const ops = json.data?.operatingList || [];
+
+    const sectionSubjects = (s) => {
+      const items = s.subjects?.length ? s.subjects
+        : s.banner?.items?.length ? s.banner.items
+        : [];
+      return items.map(normalizeMovie).filter(m => m.id && m.thumbnail);
+    };
+
+    const sections = ops
+      .map(s => ({ title: s.title, movies: sectionSubjects(s) }))
+      .filter(s => s.movies.length > 0 && !s.title.startsWith('Banner') && s.title !== 'Categories');
+
+    const seen = new Set();
+    const trending = sections
+      .flatMap(s => s.movies)
+      .filter(m => { if (seen.has(m.id)) return false; seen.add(m.id); return true; })
+      .slice(0, 40);
+
+    return { sections, trending };
+  } catch (e) { console.error(e); return { sections: [], trending: [] }; }
+};
+
+export const fetchTrending = async () => {
+  const { trending } = await fetchHomepage();
+  return trending;
+};
+
+export const fetchGenre = async (genre) => {
+  try {
+    const res = await fetch(`${API}/api/search/${encodeURIComponent(genre)}`);
+    const json = await res.json();
+    return (json.data?.items || []).map(normalizeMovie);
+  } catch (e) { console.error(e); return []; }
+};
+
+// fetchInfo expects: { subject: { movieboxId, title, subjectType, ... }, resource: { seasons } }
+// /api/info/{subjectId} returns exactly that under json.data
+export const fetchInfo = async (movieId, titleHint = '', yearHint = '') => {
+  try {
+    // Try direct info fetch first
+    const res = await fetch(`${API}/api/info/${movieId}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.data?.subject) return json.data;
     }
-    return json;
+
+    // Fall back to searching by title hint, then fetch info by subjectId
+    const query = titleHint || movieId;
+    const results = await fetchSearch(query);
+    if (results.length) {
+      const match = results.find(r => r.title?.toLowerCase().includes((titleHint || '').toLowerCase())) || results[0];
+      const res2 = await fetch(`${API}/api/info/${match.id}`);
+      if (res2.ok) {
+        const json2 = await res2.json();
+        if (json2.data?.subject) return json2.data;
+      }
+    }
+    return null;
+  } catch (e) { console.error(e); return null; }
 };
 
-export const fetchAds = async () => {
-    const res = await fetch(`${API_URL}/ads`);
-    return res.json();
+// fetchSources expects array of: { quality, streamUrl, directUrl, downloadUrl, size, format }
+// /api/sources/{subjectId}?season=X&episode=Y returns processedSources with that exact shape
+export const fetchSources = async (movieId, season = 0, episode = 0, titleHint = '', yearHint = '') => {
+  try {
+    let subjectId = movieId;
+
+    // If movieId doesn't look numeric, search for it first
+    if (isNaN(Number(subjectId)) && titleHint) {
+      const results = await fetchSearch(titleHint);
+      if (results.length) subjectId = results[0].id;
+    }
+
+    const params = new URLSearchParams();
+    if (season > 0) params.set('season', season);
+    if (episode > 0) params.set('episode', episode);
+    const qs = params.toString() ? `?${params.toString()}` : '';
+
+    const res = await fetch(`${API}/api/sources/${subjectId}${qs}`);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return json.data?.processedSources || [];
+  } catch (e) { console.error(e); return []; }
 };
 
-export const fetchAdminStats = async () => {
-    const res = await fetch(`${API_URL}/admin/stats`, { headers: getHeaders() });
-    return res.json();
+export const resolveMovieBoxId = async (id, titleHint = '') => {
+  if (!id) return null;
+  if (titleHint?.trim()) {
+    const res = await fetchSearch(titleHint.trim());
+    if (res?.length) return res[0].id;
+  }
+  return String(id);
 };
 
-export const fetchAdminUsers = async () => {
-    const res = await fetch(`${API_URL}/admin/users`, { headers: getHeaders() });
-    return res.json();
-};
+// --- AUTH stubs ---
+export const loginUser = async () => ({ status: 'error', message: 'Login not available' });
+export const signupUser = async () => ({ status: 'error', message: 'Signup not available' });
 
-export const saveAd = async (adData) => {
-    const res = await fetch(`${API_URL}/admin/ads`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(adData)
-    });
-    return res.json();
-};
-
-export const deleteAd = async (adId) => {
-    const res = await fetch(`${API_URL}/admin/ads/${adId}`, {
-        method: 'DELETE',
-        headers: getHeaders()
-    });
-    return res.json();
-};
-
-export const updateUserStatus = async (userId, data) => {
-    const res = await fetch(`${API_URL}/admin/users/${userId}`, {
-        method: 'PATCH',
-        headers: getHeaders(),
-        body: JSON.stringify(data)
-    });
-    return res.json();
-};
-
-export const fetchAdminContent = async () => {
-    const res = await fetch(`${API_URL}/admin/content`, { headers: getHeaders() });
-    return res.json();
-};
-
-export const fetchSettingsPublic = async () => {
-    const res = await fetch(`${API_URL}/settings`);
-    return res.json();
-};
-
-export const saveFeaturedContent = async (movie) => {
-    const res = await fetch(`${API_URL}/admin/content/featured`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(movie)
-    });
-    return res.json();
-};
-
-export const deleteFeaturedContent = async (id) => {
-    const res = await fetch(`${API_URL}/admin/content/featured/${id}`, {
-        method: 'DELETE',
-        headers: getHeaders()
-    });
-    return res.json();
-};
-
-export const fetchSettings = async () => {
-    const res = await fetch(`${API_URL}/admin/settings`, { headers: getHeaders() });
-    return res.json();
-};
-
-export const saveSettings = async (settings) => {
-    const res = await fetch(`${API_URL}/admin/settings`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(settings)
-    });
-    return res.json();
-};
+// --- Stubs for admin/ads/settings ---
+export const fetchAds = async () => ({ status: 'success', data: [] });
+export const fetchAdminStats = async () => ({ status: 'error', data: null });
+export const fetchAdminUsers = async () => ({ status: 'error', data: [] });
+export const saveAd = async () => ({ status: 'error' });
+export const deleteAd = async () => ({ status: 'error' });
+export const updateUserStatus = async () => ({ status: 'error' });
+export const fetchAdminContent = async () => ({ status: 'error', data: [] });
+export const fetchSettingsPublic = async () => ({ status: 'success', data: { maintenanceMode: false, siteName: 'MovieZone' } });
+export const saveFeaturedContent = async () => ({ status: 'error' });
+export const deleteFeaturedContent = async () => ({ status: 'error' });
+export const fetchSettings = async () => ({ status: 'error', data: {} });
+export const saveSettings = async () => ({ status: 'error' });
 
 export const tmdbApi = {
-    getTrending: fetchTrending,
-    getMovieDetails: async (id) => {
-        const movies = await fetchTrending();
-        return movies.find(m => m.id.toString() === id.toString());
-    }
+  getTrending: fetchTrending,
+  getMovieDetails: async (id) => {
+    const movies = await fetchTrending();
+    return movies.find(m => m.id?.toString() === id?.toString());
+  },
 };

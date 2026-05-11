@@ -128,9 +128,9 @@ export default function Player() {
         setTitle(titleHint || info?.subject?.title || info?.subject?.name || '');
         const built = sourcesRes.map(s => ({
           quality: Number(s.quality) || s.quality,
-          streamUrl: s.directUrl || s.streamUrl, // Use directUrl since API proxy is broken
+          streamUrl: s.streamUrl || s.directUrl,
           directUrl: s.directUrl,
-          downloadUrl: s.directUrl || s.downloadUrl || s.streamUrl, // Use directUrl for downloads
+          downloadUrl: s.downloadUrl || s.directUrl || s.streamUrl,
           size: s.size || '',
         }));
         setSources(built);
